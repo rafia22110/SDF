@@ -1,0 +1,200 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sky-canvas: #f2f7ff;
+  --color-sky-soft: #e6f0fd;
+  --color-ink-900: #0f172a;
+  --color-ink-700: #334155;
+  --color-ink-500: #64748b;
+  --color-glow-cyan: #0ea5e9;
+  --color-glow-pink: #ec4899;
+  --color-glow-amber: #f59e0b;
+  --color-glow-green: #10b981;
+  --color-glow-violet: #8b5cf6;
+  --font-display: "Rubik", "Heebo", "Arial Hebrew", sans-serif;
+  --font-body: "Heebo", "Rubik", "Arial Hebrew", sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-body);
+  background: linear-gradient(145deg, #f4f8ff 0%, #eef5ff 45%, #fdf4f9 100%);
+  color: #0f172a;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+}
+
+/* ---------- Luminous Daylight Sky Background ---------- */
+.starfield {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 75% 55% at 15% 10%, rgba(56, 189, 248, 0.16), transparent),
+    radial-gradient(ellipse 65% 50% at 88% 15%, rgba(167, 139, 250, 0.15), transparent),
+    radial-gradient(ellipse 60% 50% at 50% 95%, rgba(52, 211, 153, 0.12), transparent),
+    radial-gradient(ellipse 50% 40% at 10% 85%, rgba(251, 191, 36, 0.10), transparent);
+}
+.starfield::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle 180px at 18% 22%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(circle 220px at 82% 28%, rgba(255, 255, 255, 0.65), transparent),
+    radial-gradient(circle 160px at 52% 75%, rgba(255, 255, 255, 0.6), transparent);
+  opacity: 0.85;
+}
+
+/* ---------- Frosted Glass Panels (Light & Airy) ---------- */
+.glass {
+  background: linear-gradient(
+    145deg,
+    rgba(255, 255, 255, 0.76),
+    rgba(255, 255, 255, 0.56)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 10px 30px -10px rgba(15, 23, 42, 0.06),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.glass-strong {
+  background: linear-gradient(
+    155deg,
+    rgba(255, 255, 255, 0.88),
+    rgba(248, 251, 255, 0.78)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.96);
+  box-shadow:
+    0 16px 40px -12px rgba(30, 64, 175, 0.08),
+    0 4px 12px -2px rgba(15, 23, 42, 0.04),
+    inset 0 1px 1px 0 rgba(255, 255, 255, 1);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow:
+    0 8px 24px -6px rgba(15, 23, 42, 0.05),
+    inset 0 1px 0 0 rgba(255, 255, 255, 1);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* ---------- Animations ---------- */
+@keyframes float-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+.animate-float { animation: float-y 5s ease-in-out infinite; }
+.animate-float-slow { animation: float-y 7s ease-in-out infinite; }
+
+@keyframes pop-in {
+  0% { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.animate-pop { animation: pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+.animate-shake { animation: shake-x 0.38s ease-in-out; }
+
+@keyframes balloon-bob {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  50% { transform: translateY(-12px) rotate(1.5deg); }
+}
+.animate-balloon { animation: balloon-bob 3.2s ease-in-out infinite; }
+
+@keyframes confetti-fall {
+  0% { transform: translateY(-10vh) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(105vh) rotate(720deg); opacity: 0.2; }
+}
+.confetti-piece {
+  position: fixed;
+  top: 0;
+  width: 10px;
+  height: 14px;
+  border-radius: 3px;
+  z-index: 90;
+  animation: confetti-fall linear forwards;
+  pointer-events: none;
+}
+
+@keyframes bounce-soft {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+.animate-bounce-soft { animation: bounce-soft 2s ease-in-out infinite; }
+
+/* ---------- Memory Cards ---------- */
+.flip-card { perspective: 800px; }
+.flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(0.4, 0.2, 0.2, 1);
+}
+.flip-card.flipped .flip-inner { transform: rotateY(180deg); }
+.flip-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+}
+.flip-back { transform: rotateY(180deg); }
+
+/* ---------- Buttons ---------- */
+.btn-glow {
+  position: relative;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease, background-color 0.15s ease;
+  cursor: pointer;
+}
+.btn-glow:hover { transform: translateY(-1.5px); }
+.btn-glow:active { transform: translateY(0.5px) scale(0.99); }
+.btn-glow:focus-visible {
+  outline: 3px solid rgba(14, 165, 233, 0.55);
+  outline-offset: 2px;
+}
+
+/* ---------- Scrollbars ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.03); }
+::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.45); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.65); }
+
+/* ---------- Nikud Rendering ---------- */
+.nikud {
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

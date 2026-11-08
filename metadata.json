@@ -1,0 +1,6 @@
+{
+  "name": "איי אור - לוח למידה אינטראקטיבי",
+  "description": "איי אור — עולם למידה משוחק ולוח למידה אינטראקטיבי בעברית לכיתות א׳–ו׳: איים צפים, משחקי קריאה, חשבון, מדע, חשיבה ויצירה, לוח כיתה חכם וכלי ניהול למורה.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
