@@ -22,9 +22,6 @@ import {
   Check,
   AlertCircle,
   UserCheck,
-  GitBranch,
-  Download,
-  Copy,
   Link2,
   Gamepad2,
   Eye,
@@ -323,7 +320,6 @@ export function TeacherPanel({
   const [nbTitle, setNbTitle] = useState("");
   const [nbSourceText, setNbSourceText] = useState("");
   const [nbCategory, setNbCategory] = useState<BoardCategory>("מדע וחלל");
-  const [showRepoSyncModal, setShowRepoSyncModal] = useState(false);
 
   // Direct Drive / Docs / Slides / Web URL Import
   const [directLinkTitle, setDirectLinkTitle] = useState("");
@@ -941,18 +937,6 @@ export function TeacherPanel({
                 <span>פְּתַח אֶת הַלּוּחַ הַחָכָם ({liveBoardItems.length})</span>
               </button>
             )}
-
-            <button
-              onClick={() => {
-                sfx.click();
-                setShowRepoSyncModal(true);
-              }}
-              className="btn-glow px-3.5 py-2.5 rounded-xl bg-sky-50 border border-sky-200 text-xs font-bold text-sky-800 hover:bg-sky-100 flex items-center gap-1.5"
-              title="סנכרון והתאמת מאגר GitHub (rafia22110/Presentation)"
-            >
-              <GitBranch className="w-4 h-4 text-sky-600" />
-              <span>מַאֲגָר GitHub (Presentation)</span>
-            </button>
 
             <button
               onClick={() => setEditingTeacher((e) => !e)}
@@ -2603,135 +2587,6 @@ export function TeacherPanel({
                 className="btn-glow px-5 py-2 rounded-xl bg-sky-600 text-white text-xs font-bold"
               >
                 {confirmBusy ? "מְבַצֵּעַ..." : "אִישּׁוּר וּבִיצּוּעַ"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ====================================================================
-         GITHUB REPOSITORY SYNC & EXPORT MODAL (rafia22110/Presentation.git)
-         ==================================================================== */}
-      {showRepoSyncModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="glass-strong rounded-3xl p-6 max-w-2xl w-full border border-white animate-pop space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-3">
-              <div className="flex items-center gap-2.5 text-slate-900 font-extrabold text-lg">
-                <GitBranch className="w-5 h-5 text-sky-600 shrink-0" />
-                <span>הַתְאָמַת מַאֲגָר GitHub: rafia22110/Presentation</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowRepoSyncModal(false)}
-                className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
-              >
-                סְגוֹר
-              </button>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              מִבְנֶה הַפְּרוֹיֶקְט הוּתְאַם לַחֲלוּטִין לַמַּאֲגָר{" "}
-              <strong className="text-slate-900" dir="ltr">
-                https://github.com/rafia22110/Presentation.git
-              </strong>{" "}
-              וּמַחְלִיף אֶת הַקְּבָצִים הַיְּשָׁנִים בְּאַרְכִיטֶקְטוּרַת React 19 + TypeScript + Vite נְקִיָּה הַכּוֹלֶלֶת אֶת לוּחַ הַלְּמִידָה, 6 אִיֵּי הָאוֹר, מַעֲרֶכֶת הַשָּׁעוֹת הַגְּמִישָׁה וּמְחוֹלֵל הַמַּצָּגוֹת בְּ-3 לְחִיצוֹת.
-            </p>
-
-            <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs space-y-2">
-              <div className="font-extrabold flex items-center justify-between gap-2">
-                <span>⚠️ הֵרַצְתֶּם אֶת הַפְּקוּדָה בַּתִּיקִיָּה הָרָאשִׁית שֶׁל הַמַּחְשֵׁב וְהוּא סוֹרֵק אֶת כָּל הַתִּיקִיּוֹת?</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(`rmdir /s /q .git`);
-                    showToast("פקודת הביטול (ל-CMD) הועתקה! הדביקו בטרמינל והקישו Enter.");
-                  }}
-                  className="px-2.5 py-1 rounded-lg bg-amber-600 text-white font-bold text-[11px] shrink-0"
-                >
-                  הַעְתֵּק פְּקוּדַת בִּיטּוּל לְ-CMD
-                </button>
-              </div>
-              <p className="leading-relaxed text-[11px]">
-                אַל דְּאָגָה! שׁוּם קוֹבֶץ לֹא נִמְחַק וְלֹא עָלָה לָרֶשֶׁת. אִם פְּתַחְתֶּם טֶרְמִינָל רָגִיל בַּמַּחְשֵׁב (בְּלִי לְהִיכָּנֵס קוֹדֶם לְתִיקִיַּת הַפְּרוֹיֶקְט), הַפְּקוּדָה <code dir="ltr">git add -A</code> סוֹרֶקֶת אֶת תִּיקִיַּת הַמִּשְׁתַּמֵּשׁ שֶׁלָּכֶם.
-                כְּדֵי לַעֲצוֹר וּלְבַטֵּל זֹאת מִיָּד (בְּלִי לִפְגּוֹעַ בְּשׁוּם קוֹבֶץ בַּמַּחְשֵׁב!):
-              </p>
-              <div className="p-2.5 rounded-xl bg-slate-900 text-amber-200 font-mono text-[11px] space-y-1" dir="ltr">
-                <div># 1. If still running, stop it immediately:</div>
-                <div className="text-white font-bold">Ctrl + C</div>
-                <div># 2. Remove ONLY the Git tracking folder (keeps all your files safe!):</div>
-                <div className="text-emerald-300 font-bold">rmdir /s /q .git          # In Windows CMD</div>
-                <div className="text-sky-300 font-bold">Remove-Item -Recurse -Force .git   # In PowerShell</div>
-                <div className="text-purple-300 font-bold">rm -rf .git               # In Git Bash / Mac</div>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-slate-900 text-sky-100 text-xs font-mono space-y-1.5" dir="ltr">
-              <div className="flex items-center justify-between text-slate-400 text-[11px] pb-1 border-b border-slate-700">
-                <span>פקודה בטוחה (מוסיפה אך ורק את קבצי הפרויקט מתוך תיקיית הפרויקט):</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard?.writeText(
-                      `git init -b main\ngit remote add origin https://github.com/rafia22110/Presentation.git || git remote set-url origin https://github.com/rafia22110/Presentation.git\ngit add index.html package.json tsconfig.json vite.config.ts metadata.json README.md src\ngit commit -m "feat: complete rewrite to Iyey Or Interactive Learning Board"\ngit push -u --force origin main`,
-                    );
-                    showToast("הפקודות הבטוחות הועתקו ללוח!");
-                  }}
-                  className="px-2.5 py-1 rounded bg-sky-600 text-white font-sans font-bold flex items-center gap-1"
-                >
-                  <Copy className="w-3 h-3" />
-                  <span>העתק פקודות בטוחות</span>
-                </button>
-              </div>
-              <div className="text-amber-300"># Run ONLY inside the downloaded project folder:</div>
-              <div>git init -b main</div>
-              <div>git remote set-url origin https://github.com/rafia22110/Presentation.git</div>
-              <div className="text-emerald-300">git add index.html package.json tsconfig.json vite.config.ts metadata.json README.md src</div>
-              <div>git commit -m &quot;feat: complete rewrite to Iyey Or Interactive Learning Board&quot;</div>
-              <div>git push -u --force origin main</div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  sfx.correct();
-                  const payload = {
-                    project: "Iyey Or - Presentation & Interactive Learning World",
-                    repository: "https://github.com/rafia22110/Presentation.git",
-                    exportedAt: new Date().toISOString(),
-                    teacherProfile,
-                    classState,
-                    agenda,
-                    flexibleTimetable: localStorage.getItem("iyey_or_flexible_timetable_v2")
-                      ? JSON.parse(localStorage.getItem("iyey_or_flexible_timetable_v2")!)
-                      : {},
-                    smartBoardItems: localStorage.getItem("iyey_or_board_items_v1")
-                      ? JSON.parse(localStorage.getItem("iyey_or_board_items_v1")!)
-                      : [],
-                  };
-                  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-                    type: "application/json",
-                  });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "presentation-iyey-or-state.json";
-                  a.click();
-                  URL.revokeObjectURL(url);
-                  showToast("קובץ הגיבוי של המערכת והמצגות הורד למחשב!");
-                }}
-                className="btn-glow px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5"
-              >
-                <Download className="w-4 h-4" />
-                <span>יַצֵּא קוֹבֶץ גִּיבּוּי מָלֵא שֶׁל הַמַּעֲרֶכֶת (.json)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowRepoSyncModal(false)}
-                className="btn-glow px-5 py-2.5 rounded-xl bg-sky-600 text-white text-xs font-bold"
-              >
-                סִיַּימְתִּי
               </button>
             </div>
           </div>
