@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "Pdf3DModel": {
+      "title": "Pdf3DModel",
+      "description": "An interactive 3D educational model and quest generated from a PDF document or lesson topic.",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "description": "Display title of the 3D PDF model",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "fileName": {
+          "type": "string",
+          "description": "Original PDF file name",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "theme": {
+          "type": "string",
+          "description": "3D procedural scene archetype",
+          "enum": [
+            "solar-system",
+            "water-cycle",
+            "geometry-crystal",
+            "hebrew-temple",
+            "human-cell",
+            "robot-lab"
+          ]
+        },
+        "category": {
+          "type": "string",
+          "description": "Pedagogical subject category",
+          "enum": [
+            "שפה וקריאה",
+            "מתמטיקה",
+            "מדע וחלל",
+            "משימות כיתה"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "description": "Extracted summary from the PDF document",
+          "minLength": 1,
+          "maxLength": 800
+        },
+        "nodes": {
+          "type": "array",
+          "description": "Extracted knowledge nodes from the PDF (up to 8 nodes)"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the creator",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "authorName": {
+          "type": "string",
+          "description": "Display name of the teacher or student",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of creation"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        }
+      },
+      "required": [
+        "title",
+        "fileName",
+        "theme",
+        "category",
+        "summary",
+        "nodes",
+        "ownerId",
+        "authorName",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/pdf3dModels/{modelId}": {
+      "schema": {
+        "$ref": "#/entities/Pdf3DModel"
+      },
+      "description": "Stores interactive 3D models and quests generated from PDF documents."
+    }
+  }
+}

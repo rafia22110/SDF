@@ -20,28 +20,58 @@ const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
 SCOPES.forEach((scope) => provider.addScope(scope));
+provider.setCustomParameters({
+  prompt: "select_account",
+});
 
 let isSigningIn = false;
-// Keep access token strictly in memory
+// Keep access token strictly in memory per workspace-integration skill
 let cachedAccessToken: string | null = null;
+
+type AuthListener = (user: User | null, token: string | null) => void;
+const authListeners = new Set<AuthListener>();
+
+function notifyAuthListeners(user: User | null, token: string | null) {
+  authListeners.forEach((cb) => {
+    try {
+      cb(user, token);
+    } catch {
+      /* ignore */
+    }
+  });
+}
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void,
 ) => {
-  return onAuthStateChanged(auth, async (user: User | null) => {
+  const sub: AuthListener = (u, t) => {
+    if (u && t) {
+      onAuthSuccess?.(u, t);
+    } else if (!isSigningIn) {
+      onAuthFailure?.();
+    }
+  };
+  authListeners.add(sub);
+
+  const unsubFirebase = onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       if (cachedAccessToken) {
-        if (onAuthSuccess) onAuthSuccess(user, cachedAccessToken);
+        onAuthSuccess?.(user, cachedAccessToken);
       } else if (!isSigningIn) {
         cachedAccessToken = null;
-        if (onAuthFailure) onAuthFailure();
+        onAuthFailure?.();
       }
     } else {
       cachedAccessToken = null;
-      if (onAuthFailure) onAuthFailure();
+      onAuthFailure?.();
     }
   });
+
+  return () => {
+    authListeners.delete(sub);
+    unsubFirebase();
+  };
 };
 
 export const googleSignIn = async (): Promise<{
@@ -56,6 +86,7 @@ export const googleSignIn = async (): Promise<{
       throw new Error("Failed to get access token from Firebase Auth");
     }
     cachedAccessToken = credential.accessToken;
+    notifyAuthListeners(result.user, cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error) {
     console.error("Sign in error:", error);
@@ -69,9 +100,14 @@ export const getAccessToken = async (): Promise<string | null> => {
   return cachedAccessToken;
 };
 
+export const getCurrentGoogleUser = (): User | null => {
+  return auth.currentUser;
+};
+
 export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
+  notifyAuthListeners(null, null);
 };
 
 /* ---------- Google Workspace API Helpers ---------- */
@@ -87,17 +123,38 @@ export interface DriveFileItem {
   modifiedTime?: string;
 }
 
+/**
+ * Extracts a Google Drive / Docs / Slides / Sheets / Forms File ID from any share link
+ */
+export function extractGoogleDriveFileIdFromUrl(rawUrl: string): string | null {
+  const trimmed = rawUrl.trim();
+  const patterns = [
+    /\/file\/d\/([a-zA-Z0-9_-]{10,})/,
+    /docs\.google\.com\/(?:document|presentation|spreadsheets|forms|drawings)\/d\/([a-zA-Z0-9_-]{10,})/,
+    /[?&]id=([a-zA-Z0-9_-]{10,})/,
+    /\/drive\/folders\/([a-zA-Z0-9_-]{10,})/,
+  ];
+  for (const rx of patterns) {
+    const m = trimmed.match(rx);
+    if (m?.[1]) return m[1];
+  }
+  return null;
+}
+
 export async function fetchDriveFiles(
   accessToken: string,
   searchQuery?: string,
 ): Promise<DriveFileItem[]> {
-  const qParts = ["trashed = false"];
+  const qParts = [
+    "trashed = false",
+    "mimeType != 'application/vnd.google-apps.folder'",
+  ];
   if (searchQuery && searchQuery.trim()) {
-    const escaped = searchQuery.trim().replace(/'/g, "\\'");
+    const escaped = searchQuery.trim().replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     qParts.push(`name contains '${escaped}'`);
   }
   const qParam = encodeURIComponent(qParts.join(" and "));
-  const url = `https://www.googleapis.com/drive/v3/files?pageSize=24&q=${qParam}&orderBy=modifiedTime desc&fields=files(id,name,mimeType,webViewLink,iconLink,thumbnailLink,size,modifiedTime)`;
+  const url = `https://www.googleapis.com/drive/v3/files?pageSize=30&includeItemsFromAllDrives=true&supportsAllDrives=true&q=${qParam}&orderBy=modifiedTime desc&fields=files(id,name,mimeType,webViewLink,iconLink,thumbnailLink,size,modifiedTime)`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -108,13 +165,59 @@ export async function fetchDriveFiles(
   return data.files || [];
 }
 
+export async function fetchDriveFileMetadataById(
+  accessToken: string,
+  fileId: string,
+): Promise<DriveFileItem | null> {
+  try {
+    const url = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?supportsAllDrives=true&fields=id,name,mimeType,webViewLink,iconLink,thumbnailLink,size,modifiedTime`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as DriveFileItem;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Downloads a binary file from Google Drive as a real `File` object so it can be
+ * parsed by `processAnyFileToBoardItems` (PDF, Word, PowerPoint, Excel, Images, Audio, Video).
+ */
+export async function downloadDriveBinaryAsFile(
+  accessToken: string,
+  df: DriveFileItem,
+): Promise<File | null> {
+  try {
+    // Only non-google-apps native binaries can be downloaded with alt=media
+    if (df.mimeType.startsWith("application/vnd.google-apps.")) {
+      return null;
+    }
+    const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(df.id)}?alt=media&supportsAllDrives=true`;
+    const res = await fetch(mediaUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return new File([blob], df.name, {
+      type: df.mimeType || blob.type || "application/octet-stream",
+    });
+  } catch (err) {
+    console.warn("Drive binary download fallback:", err);
+    return null;
+  }
+}
+
 export async function extractDriveFileRealContent(
   accessToken: string,
   df: DriveFileItem,
 ): Promise<{
   extractedText: string;
+  fullText?: string;
   embedIframeUrl: string;
   tableData?: string[][];
+  downloadedFile?: File | null;
 }> {
   let embedIframeUrl = `https://drive.google.com/file/d/${df.id}/preview`;
   if (df.mimeType === "application/vnd.google-apps.document") {
@@ -123,6 +226,8 @@ export async function extractDriveFileRealContent(
     embedIframeUrl = `https://docs.google.com/presentation/d/${df.id}/preview`;
   } else if (df.mimeType === "application/vnd.google-apps.spreadsheet") {
     embedIframeUrl = `https://docs.google.com/spreadsheets/d/${df.id}/preview`;
+  } else if (df.mimeType === "application/vnd.google-apps.form") {
+    embedIframeUrl = `https://docs.google.com/forms/d/${df.id}/viewform?embedded=true`;
   }
 
   try {
@@ -136,10 +241,11 @@ export async function extractDriveFileRealContent(
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (res.ok) {
-        const text = (await res.text()).replace(/\s+/g, " ").trim();
-        if (text) {
+        const rawText = (await res.text()).replace(/^\uFEFF/, "").trim();
+        if (rawText) {
           return {
-            extractedText: text.slice(0, 500),
+            extractedText: rawText.replace(/\s+/g, " ").slice(0, 600),
+            fullText: rawText.slice(0, 8000),
             embedIframeUrl,
           };
         }
@@ -158,37 +264,30 @@ export async function extractDriveFileRealContent(
           .split(/\r?\n/)
           .map((l) => l.trim())
           .filter(Boolean)
-          .slice(0, 12)
-          .map((line) => line.split(",").map((c) => c.replace(/^"|"$/g, "").trim()));
+          .slice(0, 25)
+          .map((line) =>
+            line.split(",").map((c) => c.replace(/^"|"$/g, "").trim()),
+          );
         return {
           extractedText:
             rows.length > 0
               ? `טבלת Google Sheets חיה (${rows.length} שורות): ${rows[0].join(" | ")}`
               : `גיליון נתונים מיובא מ-Google Sheets (${df.name})`,
+          fullText: csvText.slice(0, 5000),
           embedIframeUrl,
           tableData: rows.length > 0 ? rows : undefined,
         };
       }
     }
 
-    // 3. Plain text / CSV / Markdown / JSON files stored in Drive
-    if (
-      df.mimeType.startsWith("text/") ||
-      df.mimeType === "application/json"
-    ) {
-      const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(df.id)}?alt=media`;
-      const res = await fetch(mediaUrl, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (res.ok) {
-        const text = (await res.text()).replace(/\s+/g, " ").trim();
-        if (text) {
-          return {
-            extractedText: text.slice(0, 500),
-            embedIframeUrl,
-          };
-        }
-      }
+    // 3. Non-Google-Apps files stored in Drive (PDF, Word .docx, PowerPoint .pptx, Excel .xlsx, Images, Audio, Video, Text)
+    const downloadedFile = await downloadDriveBinaryAsFile(accessToken, df);
+    if (downloadedFile) {
+      return {
+        extractedText: `קובץ "${df.name}" הורד ונקרא ישירות מתוך Google Drive.`,
+        embedIframeUrl,
+        downloadedFile,
+      };
     }
   } catch (err) {
     console.warn("Drive content export fallback:", err);
@@ -211,7 +310,7 @@ export async function fetchClassroomCourses(
   accessToken: string,
 ): Promise<ClassroomCourse[]> {
   const res = await fetch(
-    "https://classroom.googleapis.com/v1/courses?pageSize=10",
+    "https://classroom.googleapis.com/v1/courses?pageSize=15",
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     },

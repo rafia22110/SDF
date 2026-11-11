@@ -71,8 +71,10 @@ import {
 } from "../services/workspaceAuth";
 import {
   processAnyFileToBoardItems,
-  createBoardItemFromExternalLink,
+  processDriveFileItemToBoardItems,
+  createBoardItemFromExternalLinkAsync,
 } from "../services/fileProcessor";
+import { Pdf3DModelStudio } from "./Pdf3DModelStudio";
 
 interface TeacherPanelProps {
   classState: ClassState;
@@ -390,7 +392,7 @@ export function TeacherPanel({
     showToast("פרופיל המורה נשמר בהצלחה!");
   };
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = async (): Promise<string | null> => {
     setAuthLoading(true);
     try {
       const res = await googleSignIn();
@@ -404,10 +406,17 @@ export function TeacherPanel({
         }));
         sfx.win();
         showToast("התחברת בהצלחה ל-Google Drive, Classroom ו-Gmail!");
+        // Automatically load Drive files right after sign-in so they appear immediately
+        fetchDriveFiles(res.accessToken)
+          .then((files) => setDriveFiles(files))
+          .catch(() => {});
+        return res.accessToken;
       }
+      return null;
     } catch (err) {
       console.error(err);
       showToast("ההתחברות לחשבון Google בוטלה או נכשלה.");
+      return null;
     } finally {
       setAuthLoading(false);
     }
@@ -551,17 +560,23 @@ export function TeacherPanel({
   };
 
   const handleLoadDriveFiles = async (queryOverride?: string) => {
-    if (!accessToken) {
-      await handleGoogleLogin();
-      return;
+    let token = accessToken;
+    if (!token) {
+      token = await handleGoogleLogin();
+      if (!token) return;
     }
     setLoadingDrive(true);
     try {
       const q =
         queryOverride !== undefined ? queryOverride : driveSearchQuery;
-      const files = await fetchDriveFiles(accessToken, q);
+      const files = await fetchDriveFiles(token, q);
       setDriveFiles(files);
       sfx.click();
+      showToast(
+        files.length > 0
+          ? `נטענו ${files.length} קבצים מ-Google Drive!`
+          : "החיבור ל-Google Drive פעיל (לא נמצאו קבצים תואמים).",
+      );
     } catch (err) {
       console.error(err);
       showToast("לא ניתן לטעון קבצים מ-Google Drive כעת.");
@@ -571,40 +586,25 @@ export function TeacherPanel({
   };
 
   const handleImportDriveFileToBoard = async (df: DriveFileItem) => {
-    if (!accessToken) return;
+    let token = accessToken;
+    if (!token) {
+      token = await handleGoogleLogin();
+      if (!token) return;
+    }
     setImportingDriveId(df.id);
     try {
-      const extracted = await extractDriveFileRealContent(accessToken, df);
-      sfx.win();
-      const newItem: BoardItem = {
-        id: `drive-${df.id}-${Date.now()}`,
-        type: "note",
-        title: `☁️ ${df.name}`,
-        content: extracted.extractedText,
-        emoji: df.mimeType.includes("presentation")
-          ? "📊"
-          : df.mimeType.includes("spreadsheet")
-            ? "📈"
-            : df.mimeType.includes("document")
-              ? "📝"
-              : "📁",
-        category: uploadCategory,
-        color: "cyan",
-        fontSize: "normal",
-        pinned: true,
-        x: 70,
-        y: 70,
+      const processed = await processDriveFileItemToBoardItems(token, df, {
         author: teacherProfile.name,
-        externalUrl:
-          df.webViewLink || `https://drive.google.com/file/d/${df.id}/view`,
-        embedIframeUrl: extracted.embedIframeUrl,
-        tableData: extracted.tableData,
-        fileName: df.name,
-        fileMimeType: df.mimeType,
-        sourceLabel: "Google Drive חי",
-      };
-      pushItemToSmartBoard(newItem);
-      showToast(`"${df.name}" יובא עם תוכן חי ותצוגה מקדימה אל הלוח החכם!`);
+        category: uploadCategory,
+        splitIntoSlides: splitUploadSlides,
+      });
+      if (processed.items.length > 0) {
+        sfx.win();
+        pushMultipleItemsToSmartBoard(processed.items);
+        setUploadedItemsCount((c) => c + 1);
+        setRecentlyUploadedNames((prev) => [df.name, ...prev].slice(0, 8));
+        showToast(processed.summaryMessage);
+      }
     } catch (err) {
       console.error(err);
       showToast("שגיאה בייבוא הקובץ מ-Google Drive.");
@@ -613,11 +613,11 @@ export function TeacherPanel({
     }
   };
 
-  const handleAddDirectExternalLink = (e: React.FormEvent) => {
+  const handleAddDirectExternalLink = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!directLinkUrl.trim()) return;
-    const item = createBoardItemFromExternalLink({
-      title: directLinkTitle.trim() || "קישור / מסמך חיצוני משולב",
+    const item = await createBoardItemFromExternalLinkAsync({
+      title: directLinkTitle.trim() || undefined,
       url: directLinkUrl.trim(),
       questionOrNotes: directLinkNotes.trim(),
       category: directLinkCategory,
@@ -632,7 +632,7 @@ export function TeacherPanel({
     setDirectLinkTitle("");
     setDirectLinkUrl("");
     setDirectLinkNotes("");
-    showToast("הקישור / המסמך הוטמע בכרטיסייה חיה על הלוח החכם!");
+    showToast("הקישור / המסמך חובר והוטמע בכרטיסייה חיה על הלוח החכם!");
   };
 
   const handleAddCustomQuizQuestion = (e: React.FormEvent) => {
@@ -729,17 +729,23 @@ export function TeacherPanel({
   /* ---------- Google Classroom & Gmail Handlers ---------- */
 
   const handleLoadClassroomCourses = async () => {
-    if (!accessToken) {
-      await handleGoogleLogin();
-      return;
+    let token = accessToken;
+    if (!token) {
+      token = await handleGoogleLogin();
+      if (!token) return;
     }
     setLoadingCourses(true);
     try {
-      const list = await fetchClassroomCourses(accessToken);
+      const list = await fetchClassroomCourses(token);
       setCourses(list);
       if (list.length > 0 && !selectedCourseId) {
         setSelectedCourseId(list[0].id);
       }
+      showToast(
+        list.length > 0
+          ? `נטענו ${list.length} קורסים מ-Google Classroom!`
+          : "החיבור ל-Classroom פעיל (לא נמצאו קורסים).",
+      );
     } catch (err) {
       console.error(err);
       showToast("לא ניתן לטעון קורסים מ-Google Classroom.");
@@ -1740,10 +1746,10 @@ export function TeacherPanel({
                       className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
                     />
                     <input
-                      type="url"
+                      type="text"
                       required
                       dir="ltr"
-                      placeholder="https://docs.google.com/... או כל קישור"
+                      placeholder="https://docs.google.com/... או drive.google.com/... או כל קישור"
                       value={directLinkUrl}
                       onChange={(e) => setDirectLinkUrl(e.target.value)}
                       className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
@@ -2038,6 +2044,11 @@ export function TeacherPanel({
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* FULL-WIDTH ROW: 3D PDF Model & Quest Studio */}
+            <div className="lg:col-span-12">
+              <Pdf3DModelStudio authorName={teacherProfile.name} />
             </div>
           </div>
         </div>

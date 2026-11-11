@@ -1,0 +1,123 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 1: Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidTheme(theme) {
+      return theme is string && theme in [
+        'solar-system',
+        'water-cycle',
+        'geometry-crystal',
+        'hebrew-temple',
+        'human-cell',
+        'robot-lab'
+      ];
+    }
+
+    function isValidCategory(cat) {
+      return cat is string && cat in [
+        'שפה וקריאה',
+        'מתמטיקה',
+        'מדע וחלל',
+        'משימות כיתה'
+      ];
+    }
+
+    function isValidPdf3DModel(data) {
+      return data.keys().hasAll([
+        'title',
+        'fileName',
+        'theme',
+        'category',
+        'summary',
+        'nodes',
+        'ownerId',
+        'authorName',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'title',
+        'fileName',
+        'theme',
+        'category',
+        'summary',
+        'nodes',
+        'ownerId',
+        'authorName',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.title is string && data.title.size() >= 1 && data.title.size() <= 120 &&
+      data.fileName is string && data.fileName.size() >= 1 && data.fileName.size() <= 160 &&
+      isValidTheme(data.theme) &&
+      isValidCategory(data.category) &&
+      data.summary is string && data.summary.size() >= 1 && data.summary.size() <= 800 &&
+      data.nodes is list && data.nodes.size() >= 1 && data.nodes.size() <= 8 &&
+      data.nodes[0] is string && data.nodes[0].size() <= 300 &&
+      data.ownerId is string && isValidId(data.ownerId) &&
+      data.ownerId == request.auth.uid &&
+      data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 80 &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    match /pdf3dModels/{modelId} {
+      allow get: if isVerifiedUser() && isValidId(modelId) && existing().ownerId == request.auth.uid;
+      allow list: if isVerifiedUser() && existing().ownerId == request.auth.uid;
+
+      allow create: if isVerifiedUser() &&
+        isValidId(modelId) &&
+        isValidPdf3DModel(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser() &&
+        isValidId(modelId) &&
+        isValidPdf3DModel(incoming()) &&
+        existing().ownerId == request.auth.uid &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().fileName == existing().fileName &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'title',
+          'theme',
+          'category',
+          'summary',
+          'nodes',
+          'authorName',
+          'updatedAt'
+        ]);
+
+      allow delete: if isVerifiedUser() &&
+        isValidId(modelId) &&
+        existing().ownerId == request.auth.uid;
+    }
+  }
+}

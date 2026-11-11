@@ -35,18 +35,37 @@ import {
   Maximize2,
   X,
   FileText,
+  Box,
+  FolderOpen,
+  Search,
 } from "lucide-react";
+import { User } from "firebase/auth";
 import { Student } from "../types";
 import { sfx, speak } from "../audio";
 import { HEBREW_ALPHABET, NIKUD_MARKS } from "../data/content";
 import { AnalogClockSvg, AvatarSvg } from "./AvatarSvg";
 import {
   processAnyFileToBoardItems,
-  createBoardItemFromExternalLink,
+  processDriveFileItemToBoardItems,
+  createBoardItemFromExternalLinkAsync,
   getFileBlobUrl,
   downloadStoredFile,
   saveFileToDb,
 } from "../services/fileProcessor";
+import {
+  initAuth,
+  googleSignIn,
+  fetchDriveFiles,
+  DriveFileItem,
+} from "../services/workspaceAuth";
+import {
+  Pdf3DModelStudio,
+  Pdf3DInlineCardBanner,
+} from "./Pdf3DModelStudio";
+import {
+  getLocalPdf3DModels,
+  Pdf3DModelData,
+} from "../services/pdf3dModelBuilder";
 
 export type BoardCategory = "שפה וקריאה" | "מתמטיקה" | "מדע וחלל" | "משימות כיתה";
 export type BoardColor = "cyan" | "pink" | "amber" | "emerald" | "violet";
@@ -78,6 +97,9 @@ export interface BoardItem {
   fileSizeLabel?: string;
   mediaDataUrl?: string;
   tableData?: string[][];
+  pdf3dModelId?: string;
+  fullExtractedText?: string;
+  extractedSections?: string[];
 }
 
 export const BOARD_STORAGE_KEY = "iyey_or_board_items_v1";
@@ -263,13 +285,19 @@ export function pushMultipleItemsToSmartBoard(newItems: BoardItem[]) {
 export function BoardAttachmentView({
   item,
   onZoomImage,
+  onOpenPdf3D,
+  onOpenFullReader,
 }: {
   item: BoardItem;
   onZoomImage?: (src: string, title: string) => void;
+  onOpenPdf3D?: (item: BoardItem) => void;
+  onOpenFullReader?: (item: BoardItem, blobUrl: string | null) => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(
     item.mediaDataUrl || null,
   );
+  const [sectionIdx, setSectionIdx] = useState(0);
+  const [showRawPdfEmbed, setShowRawPdfEmbed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -284,6 +312,20 @@ export function BoardAttachmentView({
       active = false;
     };
   }, [item.fileDbId, item.mediaDataUrl]);
+
+  const sections =
+    item.extractedSections && item.extractedSections.length > 0
+      ? item.extractedSections
+      : item.fullExtractedText
+        ? [item.fullExtractedText]
+        : [];
+  const safeSectionIdx =
+    sections.length > 0 ? Math.min(sectionIdx, sections.length - 1) : 0;
+
+  const hasDocumentReader =
+    sections.length > 0 ||
+    item.attachmentType === "document" ||
+    item.attachmentType === "pdf";
 
   return (
     <div className="space-y-2.5 mt-3">
@@ -300,23 +342,102 @@ export function BoardAttachmentView({
             <button
               type="button"
               onClick={() => onZoomImage(blobUrl, item.title)}
-              className="absolute top-2 left-2 p-1.5 rounded-lg bg-slate-900/70 text-white text-[11px] font-bold flex items-center gap-1 opacity-85 hover:opacity-100"
+              className="absolute top-2 left-2 p-1.5 rounded-lg bg-slate-900/75 text-white text-[11px] font-bold flex items-center gap-1 opacity-90 hover:opacity-100"
             >
               <Maximize2 className="w-3 h-3" />
-              <span>הַגְדֵּל</span>
+              <span>הַגְדֵּל תְּמוּנָה</span>
             </button>
           )}
         </div>
       )}
 
-      {/* 2. EMBEDDED PDF VIEWER */}
-      {item.attachmentType === "pdf" && blobUrl && (
-        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
-          <iframe
-            src={blobUrl}
-            title={item.title}
-            className="w-full h-56"
-          />
+      {/* 2. INTERACTIVE DOCUMENT & PDF CONTENT READER (Shows real extracted text/pages for PDF, Word, PPTX, TXT, Drive) */}
+      {hasDocumentReader && (
+        <div className="rounded-2xl border border-sky-200/90 bg-white/95 p-3 space-y-2 shadow-2xs">
+          <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-100 pb-2">
+            <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-sky-900 truncate">
+              <FileText className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+              <span className="truncate">
+                {item.fileName || item.sourceLabel || "תוכן קובץ שנקרא"}
+              </span>
+              {item.fileSizeLabel && (
+                <span className="text-slate-400 font-semibold shrink-0">
+                  ({item.fileSizeLabel})
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {item.attachmentType === "pdf" && blobUrl && (
+                <button
+                  type="button"
+                  onClick={() => setShowRawPdfEmbed((v) => !v)}
+                  className="px-2 py-0.5 rounded-lg bg-pink-50 hover:bg-pink-100 border border-pink-200 text-[10px] font-bold text-pink-800"
+                >
+                  {showRawPdfEmbed ? "הצג טקסט שנקרא" : "תצוגת PDF מקורית"}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  speak(
+                    sections[safeSectionIdx] ||
+                      item.fullExtractedText ||
+                      item.content,
+                  )
+                }
+                className="px-2 py-0.5 rounded-lg bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[10px] font-bold text-sky-800 flex items-center gap-1"
+                title="הקרא את תוכן הקובץ"
+              >
+                <Volume2 className="w-3 h-3" />
+                <span>הַקְרֵא קוֹבֶץ</span>
+              </button>
+            </div>
+          </div>
+
+          {showRawPdfEmbed && blobUrl ? (
+            <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
+              <object
+                data={blobUrl}
+                type="application/pdf"
+                className="w-full h-56"
+              >
+                <iframe src={blobUrl} title={item.title} className="w-full h-56" />
+              </object>
+            </div>
+          ) : (
+            <div className="max-h-36 overflow-y-auto rounded-xl bg-slate-50/90 border border-slate-200/70 p-2.5 text-xs text-slate-800 leading-relaxed whitespace-pre-line">
+              {sections[safeSectionIdx] ||
+                item.fullExtractedText ||
+                item.content}
+            </div>
+          )}
+
+          {sections.length > 1 && !showRawPdfEmbed && (
+            <div className="flex items-center justify-between gap-2 pt-1 text-[11px]">
+              <button
+                type="button"
+                disabled={safeSectionIdx === 0}
+                onClick={() => setSectionIdx((i) => Math.max(0, i - 1))}
+                className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 font-bold text-slate-700"
+              >
+                ◀ הַקּוֹדֵם
+              </button>
+              <span className="font-bold text-sky-800 tabular-nums">
+                חֵלֶק / עַמּוּד {safeSectionIdx + 1} מִתּוֹךְ {sections.length}
+              </span>
+              <button
+                type="button"
+                disabled={safeSectionIdx >= sections.length - 1}
+                onClick={() =>
+                  setSectionIdx((i) => Math.min(sections.length - 1, i + 1))
+                }
+                className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 disabled:opacity-40 font-bold text-slate-700"
+              >
+                הַבָּא ▶
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -341,17 +462,23 @@ export function BoardAttachmentView({
             <thead>
               <tr className="bg-sky-50 border-b border-slate-200 text-slate-800 font-extrabold">
                 {item.tableData[0].map((cell, cIdx) => (
-                  <th key={cIdx} className="px-2 py-1.5 border-l border-slate-200/70 truncate max-w-[120px]">
+                  <th
+                    key={cIdx}
+                    className="px-2 py-1.5 border-l border-slate-200/70 truncate max-w-[120px]"
+                  >
                     {cell || `עמודה ${cIdx + 1}`}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/60">
-              {item.tableData.slice(1, 8).map((row, rIdx) => (
+              {item.tableData.slice(1, 10).map((row, rIdx) => (
                 <tr key={rIdx} className="hover:bg-sky-50/40">
                   {row.map((cell, cIdx) => (
-                    <td key={cIdx} className="px-2 py-1 border-l border-slate-200/50 text-slate-700 truncate max-w-[120px]">
+                    <td
+                      key={cIdx}
+                      className="px-2 py-1 border-l border-slate-200/50 text-slate-700 truncate max-w-[120px]"
+                    >
                       {cell}
                     </td>
                   ))}
@@ -387,9 +514,23 @@ export function BoardAttachmentView({
         </div>
       )}
 
-      {/* 8. FILE DOWNLOAD / OPEN ORIGINAL ACTION BAR */}
-      {(item.fileDbId || item.externalUrl || blobUrl) && (
+      {/* 8. FILE READER MODAL / DOWNLOAD / OPEN ORIGINAL ACTION BAR */}
+      {(item.fileDbId ||
+        item.externalUrl ||
+        blobUrl ||
+        item.fullExtractedText ||
+        item.embedIframeUrl) && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
+          {onOpenFullReader && (
+            <button
+              type="button"
+              onClick={() => onOpenFullReader(item, blobUrl)}
+              className="btn-glow px-2.5 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-[11px] font-extrabold inline-flex items-center gap-1.5 shadow-2xs"
+            >
+              <Maximize2 className="w-3 h-3" />
+              <span>פְּתַח קוֹרֵא קוֹבֶץ מָלֵא</span>
+            </button>
+          )}
           {item.fileDbId && (
             <button
               type="button"
@@ -400,21 +541,10 @@ export function BoardAttachmentView({
             >
               <Download className="w-3.5 h-3.5 text-emerald-600" />
               <span>
-                הוֹרֵד קוֹבֶץ מָקוֹר{" "}
+                הוֹרֵד קוֹבֶץ{" "}
                 {item.fileSizeLabel ? `(${item.fileSizeLabel})` : ""}
               </span>
             </button>
-          )}
-          {blobUrl && (
-            <a
-              href={blobUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[11px] font-bold text-sky-800 inline-flex items-center gap-1"
-            >
-              <ExternalLink className="w-3 h-3" />
-              <span>פְּתַח בְּחַלּוֹן מָלֵא</span>
-            </a>
           )}
           {item.externalUrl && (
             <a
@@ -429,6 +559,19 @@ export function BoardAttachmentView({
           )}
         </div>
       )}
+
+      {/* 9. LIVE 3D PDF MODEL & QUEST LAUNCHER BANNER */}
+      {onOpenPdf3D &&
+        (item.attachmentType === "pdf" ||
+          Boolean(item.pdf3dModelId) ||
+          Boolean(item.fileName?.toLowerCase().endsWith(".pdf"))) && (
+          <Pdf3DInlineCardBanner
+            fileName={item.fileName}
+            title={item.title}
+            category={item.category}
+            onOpen3DStudio={() => onOpenPdf3D(item)}
+          />
+        )}
     </div>
   );
 }
@@ -484,8 +627,23 @@ export function SmartBoard({
   userName: string;
 }) {
   const [subTab, setSubTab] = useState<
-    "workspace" | "alphabet" | "hundred" | "tools"
+    "workspace" | "pdf3d" | "alphabet" | "hundred" | "tools"
   >("workspace");
+  const [selectedPdf3DModel, setSelectedPdf3DModel] =
+    useState<Pdf3DModelData | null>(null);
+
+  const handleOpenItemIn3DStudio = (item: BoardItem) => {
+    const allModels = getLocalPdf3DModels();
+    const matched =
+      (item.pdf3dModelId &&
+        allModels.find((m) => m.id === item.pdf3dModelId)) ||
+      (item.fileName &&
+        allModels.find((m) => m.fileName === item.fileName)) ||
+      allModels[0] ||
+      null;
+    setSelectedPdf3DModel(matched);
+    setSubTab("pdf3d");
+  };
 
   // Journey Station (1..4)
   const [activeStation, setActiveStation] = useState<1 | 2 | 3 | 4>(1);
@@ -503,15 +661,15 @@ export function SmartBoard({
   const boardContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Creation Studio Tabs on the SmartBoard:
-  // "note" (Note/Flashcard + optional file), "upload" (Any File Multi-Upload), "link" (YouTube/Drive/Web URL), "voice" (Live Mic Recorder)
+  // "note" (Note/Flashcard + instant file), "upload" (Any File Multi-Upload), "drive" (Google Drive Live Browser), "link" (YouTube/Drive/Web URL), "voice" (Live Mic Recorder)
   const [createMode, setCreateMode] = useState<
-    "note" | "upload" | "link" | "voice"
+    "note" | "upload" | "drive" | "link" | "voice"
   >("note");
   const [boardToast, setBoardToast] = useState<string | null>(null);
 
   const showBoardNotification = (msg: string) => {
     setBoardToast(msg);
-    setTimeout(() => setBoardToast(null), 4000);
+    setTimeout(() => setBoardToast(null), 4500);
   };
 
   // Mode 1: Quick Note / Flashcard + optional file attachment
@@ -529,13 +687,40 @@ export function SmartBoard({
   const [splitFilesIntoSlides, setSplitFilesIntoSlides] = useState(true);
   const [isDraggingFilesOver, setIsDraggingFilesOver] = useState(false);
   const [uploadingFilesBusy, setUploadingFilesBusy] = useState(false);
+  const [lastUploadedPreviewItem, setLastUploadedPreviewItem] =
+    useState<BoardItem | null>(null);
   const multiFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Mode 2B: Google Drive Live Browser & File Importer right on SmartBoard
+  const [driveUser, setDriveUser] = useState<User | null>(null);
+  const [driveToken, setDriveToken] = useState<string | null>(null);
+  const [driveFiles, setDriveFiles] = useState<DriveFileItem[]>([]);
+  const [driveSearch, setDriveSearch] = useState("");
+  const [driveLoading, setDriveLoading] = useState(false);
+  const [importingDriveFileId, setImportingDriveFileId] = useState<string | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const unsub = initAuth(
+      (u, token) => {
+        setDriveUser(u);
+        setDriveToken(token);
+      },
+      () => {
+        setDriveUser(null);
+        setDriveToken(null);
+      },
+    );
+    return () => unsub();
+  }, []);
 
   // Mode 3: External Link / YouTube / Google Drive / Docs / Slides
   const [linkUrl, setLinkUrl] = useState("");
   const [linkTitle, setLinkTitle] = useState("");
   const [linkNotes, setLinkNotes] = useState("");
   const [linkCategory, setLinkCategory] = useState<BoardCategory>("מדע וחלל");
+  const [connectingLinkBusy, setConnectingLinkBusy] = useState(false);
 
   // Mode 4: Live Voice Recording (MediaRecorder)
   const [isRecordingAudio, setIsRecordingAudio] = useState(false);
@@ -544,8 +729,12 @@ export function SmartBoard({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<BlobPart[]>([]);
 
-  // Inline Card Editor Modal & Image Lightbox & Full-Screen Presentation Mode
+  // Inline Card Editor Modal, Full-Screen File Reader Modal, Image Lightbox & Presentation Mode
   const [editingItem, setEditingItem] = useState<BoardItem | null>(null);
+  const [fullReaderModal, setFullReaderModal] = useState<{
+    item: BoardItem;
+    blobUrl: string | null;
+  } | null>(null);
   const [zoomedImage, setZoomedImage] = useState<{
     src: string;
     title: string;
@@ -741,7 +930,11 @@ export function SmartBoard({
     showBoardNotification(`"${created.title}" נוסף ללוח הלמידה!`);
   };
 
-  const handleMultiFilesUpload = async (fileList: FileList | File[]) => {
+  const handleMultiFilesUpload = async (
+    fileList: FileList | File[],
+    customTitleOverride?: string,
+    customContentOverride?: string,
+  ) => {
     const filesArray = Array.from(fileList);
     if (filesArray.length === 0) return;
     setUploadingFilesBusy(true);
@@ -754,7 +947,18 @@ export function SmartBoard({
           category: quickCategory,
           splitIntoSlides: splitFilesIntoSlides,
         });
-        allCreated.push(...res.items);
+        const customizedItems = res.items.map((it, idx) => ({
+          ...it,
+          title:
+            idx === 0 && customTitleOverride?.trim()
+              ? customTitleOverride.trim()
+              : it.title,
+          content:
+            idx === 0 && customContentOverride?.trim()
+              ? `${customContentOverride.trim()}\n\n${it.content}`
+              : it.content,
+        }));
+        allCreated.push(...customizedItems);
         lastMessage = res.summaryMessage;
       }
       if (allCreated.length > 0) {
@@ -762,10 +966,11 @@ export function SmartBoard({
         const next = [...allCreated, ...items];
         setItems(next);
         broadcastUpdate(next);
+        setLastUploadedPreviewItem(allCreated[0]);
         showBoardNotification(
           filesArray.length === 1
             ? lastMessage
-            : `הועלו ${filesArray.length} קבצים ונוצרו ${allCreated.length} כרטיסיות חיות על הלוח!`,
+            : `נקראו והועלו ${filesArray.length} קבצים ונוצרו ${allCreated.length} כרטיסיות חיות על הלוח!`,
         );
       }
     } catch (err) {
@@ -776,25 +981,91 @@ export function SmartBoard({
     }
   };
 
-  const handleAddExternalLink = (e: React.FormEvent) => {
+  const handleLoadSmartBoardDriveFiles = async (searchOverride?: string) => {
+    setDriveLoading(true);
+    try {
+      let activeToken = driveToken;
+      if (!activeToken) {
+        const loginRes = await googleSignIn();
+        if (!loginRes?.accessToken) {
+          setDriveLoading(false);
+          return;
+        }
+        activeToken = loginRes.accessToken;
+        setDriveUser(loginRes.user);
+        setDriveToken(loginRes.accessToken);
+      }
+      const q = searchOverride !== undefined ? searchOverride : driveSearch;
+      const files = await fetchDriveFiles(activeToken, q);
+      setDriveFiles(files);
+      sfx.win();
+      showBoardNotification(
+        files.length > 0
+          ? `נטענו ${files.length} קבצים מחשבון ה-Google Drive שלך!`
+          : "החיבור ל-Google Drive הצליח, לא נמצאו קבצים תואמים לחיפוש.",
+      );
+    } catch (err) {
+      console.error(err);
+      showBoardNotification(
+        "לא ניתן להתחבר או לטעון קבצים מ-Google Drive כעת. ניתן גם להדביק קישור ישיר ל-Drive!",
+      );
+    } finally {
+      setDriveLoading(false);
+    }
+  };
+
+  const handleImportDriveFileToSmartBoard = async (df: DriveFileItem) => {
+    if (!driveToken) return;
+    setImportingDriveFileId(df.id);
+    try {
+      const processed = await processDriveFileItemToBoardItems(driveToken, df, {
+        author: userName,
+        category: quickCategory,
+        splitIntoSlides: splitFilesIntoSlides,
+      });
+      if (processed.items.length > 0) {
+        sfx.win();
+        const next = [...processed.items, ...items];
+        setItems(next);
+        broadcastUpdate(next);
+        setLastUploadedPreviewItem(processed.items[0]);
+        showBoardNotification(processed.summaryMessage);
+      }
+    } catch (err) {
+      console.error(err);
+      showBoardNotification("שגיאה בקריאת הקובץ מתוך Google Drive.");
+    } finally {
+      setImportingDriveFileId(null);
+    }
+  };
+
+  const handleAddExternalLink = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!linkUrl.trim()) return;
-    const created = createBoardItemFromExternalLink({
-      url: linkUrl,
-      title: linkTitle,
-      questionOrNotes: linkNotes,
-      category: linkCategory,
-      author: userName,
-    });
-    if (!created) return;
-    sfx.win();
-    const next = [created, ...items];
-    setItems(next);
-    broadcastUpdate(next);
-    setLinkUrl("");
-    setLinkTitle("");
-    setLinkNotes("");
-    showBoardNotification(`הקישור "${created.title}" הוטמע ככרטיסייה חיה על הלוח!`);
+    setConnectingLinkBusy(true);
+    try {
+      const created = await createBoardItemFromExternalLinkAsync({
+        url: linkUrl,
+        title: linkTitle,
+        questionOrNotes: linkNotes,
+        category: linkCategory,
+        author: userName,
+      });
+      if (!created) return;
+      sfx.win();
+      const next = [created, ...items];
+      setItems(next);
+      broadcastUpdate(next);
+      setLastUploadedPreviewItem(created);
+      setLinkUrl("");
+      setLinkTitle("");
+      setLinkNotes("");
+      showBoardNotification(
+        `הקישור "${created.title}" חובר והוטמע ככרטיסייה חיה על הלוח!`,
+      );
+    } finally {
+      setConnectingLinkBusy(false);
+    }
   };
 
   const startVoiceRecording = async () => {
@@ -1250,6 +1521,10 @@ export function SmartBoard({
           <BoardAttachmentView
             item={item}
             onZoomImage={(src, title) => setZoomedImage({ src, title })}
+            onOpenPdf3D={handleOpenItemIn3DStudio}
+            onOpenFullReader={(it, url) =>
+              setFullReaderModal({ item: it, blobUrl: url })
+            }
           />
         </div>
 
@@ -1524,7 +1799,23 @@ export function SmartBoard({
                 }`}
               >
                 <Upload className="w-3.5 h-3.5" />
-                <span>📂 הַעֲלָאַת קְבָצִים מִכָּל פּוֹרְמָט (PDF, Word, מצגת, תמונה, שמע, וידאו)</span>
+                <span>📂 הַעֲלָאַת וּקְרִיאַת קְבָצִים מֵהַמַּחְשֵׁב (כל הפורמטים)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.click();
+                  setCreateMode("drive");
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all ${
+                  createMode === "drive"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "bg-white/80 text-slate-700 hover:bg-white border border-slate-200/80"
+                }`}
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+                <span>☁️ חִיבּוּר וִיבוּא מ-Google Drive</span>
               </button>
 
               <button
@@ -1540,7 +1831,7 @@ export function SmartBoard({
                 }`}
               >
                 <Link2 className="w-3.5 h-3.5" />
-                <span>🔗 חִיבּוּר קִישּׁוּר חַי (YouTube / Drive / Docs / אתר)</span>
+                <span>🔗 חִיבּוּר קִישּׁוּר חַי (YouTube / Docs / אתר)</span>
               </button>
 
               <button
@@ -1558,6 +1849,18 @@ export function SmartBoard({
                 <Mic className="w-3.5 h-3.5" />
                 <span>🎙️ הַקְלָטָה קוֹלִית חַיָּה</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.win();
+                  setSubTab("pdf3d");
+                }}
+                className="px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-sky-300 border border-sky-400/50 shadow-xs transition-all"
+              >
+                <Box className="w-3.5 h-3.5 text-sky-400" />
+                <span>🧊 אֻלְפַּן מוֹדֶלִים וּמִשְׂחֲקֵי 3D מִ-PDF</span>
+              </button>
             </div>
 
             <span className="text-[11px] font-bold text-slate-500">
@@ -1565,7 +1868,7 @@ export function SmartBoard({
             </span>
           </div>
 
-          {/* MODE 1: Quick Note / Flashcard + Optional Any-Format File Attachment */}
+          {/* MODE 1: Quick Note / Flashcard + Instant File Upload */}
           {createMode === "note" && (
             <form onSubmit={handleQuickAdd} className="space-y-3">
               <div className="flex flex-wrap items-center gap-2.5">
@@ -1619,30 +1922,39 @@ export function SmartBoard({
                   className="flex-1 min-w-[200px] px-4 py-2.5 rounded-xl bg-white/95 border border-slate-200/90 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-sky-400"
                 />
 
+                {/* Selecting any file here immediately reads & adds it to the board! */}
                 <input
                   ref={quickFileInputRef}
                   type="file"
                   accept="*/*"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) setAttachedQuickFile(f);
+                  multiple
+                  onChange={async (e) => {
+                    const files = e.target.files;
+                    if (files && files.length > 0) {
+                      await handleMultiFilesUpload(
+                        files,
+                        quickTitle,
+                        quickContent,
+                      );
+                      setQuickTitle("");
+                      setQuickContent("");
+                      setAttachedQuickFile(null);
+                      e.target.value = "";
+                    }
                   }}
                   className="hidden"
                 />
                 <button
                   type="button"
+                  disabled={uploadingFilesBusy}
                   onClick={() => quickFileInputRef.current?.click()}
-                  className={`px-3 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap ${
-                    attachedQuickFile
-                      ? "bg-emerald-50 border-emerald-300 text-emerald-800"
-                      : "bg-white/80 border-slate-200 text-slate-700 hover:bg-white"
-                  }`}
+                  className="btn-glow px-3.5 py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-xs font-extrabold text-emerald-900 flex items-center gap-1.5 whitespace-nowrap"
                 >
                   <Upload className="w-3.5 h-3.5 text-emerald-600" />
                   <span>
-                    {attachedQuickFile
-                      ? `מְצוֹרָף: ${attachedQuickFile.name.slice(0, 18)}`
-                      : "+ צָרֵף קוֹבֶץ"}
+                    {uploadingFilesBusy
+                      ? "קוֹרֵא קוֹבֶץ..."
+                      : "+ הַעֲלֵה / צָרֵף קוֹבֶץ מִיָּדִית"}
                   </span>
                 </button>
 
@@ -1737,23 +2049,172 @@ export function SmartBoard({
 
               <div
                 onClick={() => multiFileInputRef.current?.click()}
-                className="cursor-pointer border-2 border-dashed border-emerald-400 hover:border-emerald-600 bg-emerald-50/60 hover:bg-emerald-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all"
+                className="cursor-pointer border-2 border-dashed border-emerald-500 hover:border-emerald-600 bg-emerald-50/75 hover:bg-emerald-100/70 rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all"
               >
-                <Upload className="w-9 h-9 text-emerald-600 mb-2" />
-                <div className="text-sm font-extrabold text-slate-900">
+                <Upload className="w-10 h-10 text-emerald-600 mb-2" />
+                <div className="text-base font-extrabold text-slate-900">
                   {uploadingFilesBusy
-                    ? "מְעַבֵּד וּמַעֲלֶה קְבָצִים לַלּוּחַ..."
-                    : "לִחֲצוּ כָּאן לִבְחִירַת קְבָצִים מֵהַמַּחְשֵׁב אוֹ גִּרְרוּ קְבָצִים לְכָאן"}
+                    ? "⏳ קוֹרֵא, מְפַעְנֵחַ וּמַעֲלֶה אֶת הַקְּבָצִים לַלּוּחַ..."
+                    : "לִחֲצוּ כָּאן לִבְחִירַת קְבָצִים מֵהַמַּחְשֵׁב (אוֹ גִּרְרוּ קְבָצִים לְכָאן)"}
                 </div>
                 <div className="text-xs text-slate-600 mt-1 max-w-2xl">
-                  תּוֹמֵךְ בְּכָל הַפּוֹרְמָטִים: <strong>PDF</strong> (מציג מסמך חי),{" "}
-                  <strong>PowerPoint (.pptx)</strong> (פירוק לשקופיות),{" "}
-                  <strong>Word (.docx)</strong>, <strong>Excel / CSV (.xlsx, .csv)</strong>{" "}
-                  (טבלה חיה), <strong>תְּמוּנוֹת</strong> (PNG, JPG, SVG, GIF, WebP),{" "}
-                  <strong>שֵׁמַע</strong> (MP3, WAV, M4A), <strong>וִידֵאוֹ</strong> (MP4, WebM),{" "}
-                  <strong>JSON / HTML / TXT / ZIP</strong> וְכָל קוֹבֶץ אַחֵר!
+                  קְרִיאָה מְלֵאָה שֶׁל כָּל קוֹבֶץ בְּסִיסִי וּמִתְקַדֵּם: <strong>PDF</strong> (פענוח טקסט + מודל 3D),{" "}
+                  <strong>Word (.docx / .doc / .rtf)</strong>,{" "}
+                  <strong>PowerPoint (.pptx / .ppt)</strong>,{" "}
+                  <strong>Excel / CSV (.xlsx / .csv)</strong>,{" "}
+                  <strong>טֶקְסְט (.txt / .md / .html)</strong>, <strong>תְּמוּנוֹת</strong>,{" "}
+                  <strong>שֵׁמַע</strong> וְ-<strong>וִידֵאוֹ</strong>!
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    multiFileInputRef.current?.click();
+                  }}
+                  className="mt-3 btn-glow px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs flex items-center gap-2 shadow-sm"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>בְּחַר קְבָצִים מֵהַמַּחְשֵׁב כָּעֵת</span>
+                </button>
+              </div>
+
+              {lastUploadedPreviewItem && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50/90 border border-emerald-300 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="truncate max-w-xl">
+                    <span className="font-extrabold text-emerald-950">
+                      ✅ נִקְרָא וְנוֹסַף לַלּוּחַ: {lastUploadedPreviewItem.title}
+                    </span>
+                    <p className="text-slate-700 truncate mt-0.5">
+                      {lastUploadedPreviewItem.content}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFullReaderModal({
+                          item: lastUploadedPreviewItem,
+                          blobUrl: null,
+                        })
+                      }
+                      className="btn-glow px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold"
+                    >
+                      🔍 פְּתַח תּוֹכֶן הַקּוֹבֶץ שֶׁנִּקְרָא
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* MODE 2B: Direct Google Drive Live Browser & File Importer on the SmartBoard */}
+          {createMode === "drive" && (
+            <div className="p-4 rounded-2xl bg-blue-50/80 border border-blue-200 space-y-3 animate-pop">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                    <FolderOpen className="w-4 h-4 text-blue-600" />
+                    <span>
+                      יְבוּא וּקְרִיאַת קְבָצִים חַיִּים מ-Google Drive יְשִׁירוֹת לַלּוּחַ
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    הִתְחַבְּרוּ לְחֶשְׁבּוֹן Google כְּדֵי לִרְאוֹת אֶת הַקְּבָצִים שֶׁלָּכֶם בְּ-Drive (מִסְמְכֵי Docs, מַצָּגוֹת Slides, גִּלְיוֹנוֹת Sheets, קִבְצֵי PDF, Word וּתְמוּנוֹת) וּלְיַבֵּא אוֹתָם בִּלְחִיצָה!
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {driveUser && (
+                    <span className="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-900 text-[11px] font-bold">
+                      מחובר: {driveUser.displayName || driveUser.email}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={driveLoading}
+                    onClick={() => handleLoadSmartBoardDriveFiles()}
+                    className="btn-glow px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-xs"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                    <span>
+                      {driveLoading
+                        ? "מִתְחַבֵּר וְטוֹעֵן מ-Drive..."
+                        : driveToken
+                          ? "🔄 רַעֲנֵן רְשִׁימַת קְבָצִים מ-Drive"
+                          : "☁️ הִתְחַבֵּר ל-Google Drive וְהַצֵּג קְבָצִים"}
+                    </span>
+                  </button>
                 </div>
               </div>
+
+              {driveToken && (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={driveSearch}
+                    onChange={(e) => setDriveSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleLoadSmartBoardDriveFiles(driveSearch);
+                      }
+                    }}
+                    placeholder="חַפְּשׂוּ קוֹבֶץ לְפִי שֵׁם בְּתוֹךְ ה-Google Drive שֶׁלָּכֶם..."
+                    className="flex-1 px-3.5 py-2 rounded-xl bg-white border border-blue-200 text-xs text-slate-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleLoadSmartBoardDriveFiles(driveSearch)}
+                    className="btn-glow px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>חַפֵּשׂ בְּ-Drive</span>
+                  </button>
+                </div>
+              )}
+
+              {driveFiles.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 max-h-60 overflow-y-auto pr-1">
+                  {driveFiles.map((df) => (
+                    <div
+                      key={df.id}
+                      className="p-3 rounded-2xl bg-white border border-blue-200/90 flex items-center justify-between gap-2 text-xs shadow-2xs"
+                    >
+                      <div className="truncate">
+                        <div className="font-extrabold text-slate-900 truncate">
+                          {df.name}
+                        </div>
+                        <div className="text-[11px] text-slate-500 truncate">
+                          {df.mimeType.replace("application/vnd.google-apps.", "Google ")}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={importingDriveFileId === df.id}
+                        onClick={() => handleImportDriveFileToSmartBoard(df)}
+                        className="btn-glow px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-extrabold shrink-0"
+                      >
+                        {importingDriveFileId === df.id
+                          ? "קוֹרֵא..."
+                          : "+ קְרָא וְהוֹסֵף לַלּוּחַ"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-white/80 border border-blue-200/70 text-xs text-slate-600 flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    לִחֲצוּ עַל &quot;הִתְחַבֵּר ל-Google Drive וְהַצֵּג קְבָצִים&quot; לִטְעִינַת הַקְּבָצִים שֶׁלָּכֶם, אוֹ הַדְבִּיקוּ קִישּׁוּר יָשִׁיר לְקוֹבֶץ בְּ-Drive:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCreateMode("link")}
+                    className="px-3 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-900 font-bold"
+                  >
+                    הַדְבֵּק קִישּׁוּר ל-Drive ⬅
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -1791,10 +2252,11 @@ export function SmartBoard({
                 </select>
                 <button
                   type="submit"
-                  className="md:col-span-2 btn-glow py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                  disabled={connectingLinkBusy}
+                  className="md:col-span-2 btn-glow py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5"
                 >
                   <Link2 className="w-3.5 h-3.5" />
-                  <span>הַטְמַע בַּלּוּחַ</span>
+                  <span>{connectingLinkBusy ? "מְחַבֵּר..." : "הַטְמַע בַּלּוּחַ"}</span>
                 </button>
               </div>
               <input
@@ -1927,6 +2389,21 @@ export function SmartBoard({
           >
             <LayoutGrid className="w-3.5 h-3.5" />
             <span>הַלּוּחַ שֶׁלִּי ({items.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              sfx.win();
+              setSubTab("pdf3d");
+            }}
+            className={`btn-glow px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 whitespace-nowrap ${
+              subTab === "pdf3d"
+                ? "bg-slate-900 text-sky-300 border border-sky-400 shadow-xs"
+                : "bg-sky-50 text-sky-900 hover:bg-sky-100 border border-sky-200"
+            }`}
+          >
+            <Box className="w-3.5 h-3.5 text-sky-500" />
+            <span>🧊 מוֹדֶלִים וּמִשְׂחֲקֵי 3D מִ-PDF</span>
           </button>
           <button
             type="button"
@@ -2219,6 +2696,24 @@ export function SmartBoard({
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+         SUBTAB: INTERACTIVE 3D PDF MODEL & QUEST STUDIO (אולפן תלת-ממד מקבצי PDF)
+         ==================================================================== */}
+      {subTab === "pdf3d" && (
+        <div className="space-y-4 animate-pop">
+          <Pdf3DModelStudio
+            initialModel={selectedPdf3DModel}
+            authorName={userName}
+            onClose={() => setSubTab("workspace")}
+            onEarnRewards={(xp, stars) => {
+              showBoardNotification(
+                `כל הכבוד! השלמתם חקר מודל PDF בתלת־ממד וזכיתם ב-+${xp} XP ו-+${stars} ⭐!`,
+              );
+            }}
+          />
         </div>
       )}
 
@@ -2832,6 +3327,163 @@ export function SmartBoard({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+         FULL-SCREEN IN-APP FILE & DOCUMENT READER MODAL (קורא קבצים ומסמכים מלא)
+         ==================================================================== */}
+      {fullReaderModal && (
+        <div
+          onClick={() => setFullReaderModal(null)}
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-4xl w-full bg-white rounded-3xl p-6 shadow-2xl space-y-4 animate-pop max-h-[90vh] flex flex-col"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">{fullReaderModal.item.emoji}</span>
+                <div>
+                  <h3 className="text-lg font-extrabold text-slate-900">
+                    {fullReaderModal.item.title}
+                  </h3>
+                  <div className="text-xs text-slate-500">
+                    {fullReaderModal.item.fileName ||
+                      fullReaderModal.item.sourceLabel ||
+                      fullReaderModal.item.category}{" "}
+                    {fullReaderModal.item.fileSizeLabel
+                      ? `· ${fullReaderModal.item.fileSizeLabel}`
+                      : ""}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    speak(
+                      fullReaderModal.item.fullExtractedText ||
+                        fullReaderModal.item.content,
+                    )
+                  }
+                  className="btn-glow px-3.5 py-2 rounded-xl bg-sky-100 hover:bg-sky-200 text-sky-900 font-bold text-xs flex items-center gap-1.5"
+                >
+                  <Volume2 className="w-4 h-4" />
+                  <span>הַקְרֵא תּוֹכֶן בְּקוֹל</span>
+                </button>
+                {(fullReaderModal.item.attachmentType === "pdf" ||
+                  fullReaderModal.item.pdf3dModelId) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const it = fullReaderModal.item;
+                      setFullReaderModal(null);
+                      handleOpenItemIn3DStudio(it);
+                    }}
+                    className="btn-glow px-3.5 py-2 rounded-xl bg-slate-900 text-sky-300 font-extrabold text-xs flex items-center gap-1.5"
+                  >
+                    <Box className="w-4 h-4 text-sky-400" />
+                    <span>שַׁגֵּר לְמַעְבָּדָה 3D</span>
+                  </button>
+                )}
+                {fullReaderModal.item.fileDbId && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      downloadStoredFile(
+                        fullReaderModal.item.fileDbId!,
+                        fullReaderModal.item.fileName ||
+                          fullReaderModal.item.title,
+                      )
+                    }
+                    className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>הוֹרֵד קוֹבֶץ מָקוֹר</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setFullReaderModal(null)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs"
+                >
+                  סְגוֹר ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+              {/* Extracted Sections / Full Text Reader */}
+              {fullReaderModal.item.extractedSections &&
+              fullReaderModal.item.extractedSections.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="text-xs font-extrabold text-sky-800">
+                    📄 תּוֹכֶן הַקּוֹבֶץ שֶׁנִּקְרָא ({fullReaderModal.item.extractedSections.length} חֲלָקִים / עַמּוּדִים):
+                  </div>
+                  {fullReaderModal.item.extractedSections.map((sec, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-relaxed whitespace-pre-line"
+                    >
+                      <div className="text-xs font-extrabold text-sky-700 mb-1">
+                        חֵלֶק / עַמּוּד {idx + 1}:
+                      </div>
+                      {sec}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-800 leading-relaxed whitespace-pre-line">
+                  {fullReaderModal.item.fullExtractedText ||
+                    fullReaderModal.item.content}
+                </div>
+              )}
+
+              {/* Table View if Spreadsheet */}
+              {fullReaderModal.item.tableData &&
+                fullReaderModal.item.tableData.length > 0 && (
+                  <div className="rounded-2xl border border-slate-200 overflow-x-auto">
+                    <table className="w-full text-right text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-sky-50 border-b border-slate-200 font-extrabold text-slate-900">
+                          {fullReaderModal.item.tableData[0].map((c, i) => (
+                            <th key={i} className="px-3 py-2 border-l border-slate-200">
+                              {c || `עמודה ${i + 1}`}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {fullReaderModal.item.tableData.slice(1).map((r, rIdx) => (
+                          <tr key={rIdx}>
+                            {r.map((c, cIdx) => (
+                              <td key={cIdx} className="px-3 py-1.5 border-l border-slate-200 text-slate-700">
+                                {c}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+              {/* Embedded Google Docs / Slides / Drive / PDF Viewer */}
+              {fullReaderModal.item.embedIframeUrl && (
+                <div className="rounded-2xl overflow-hidden border border-slate-200 h-96 bg-slate-100">
+                  <iframe
+                    src={fullReaderModal.item.embedIframeUrl}
+                    title={fullReaderModal.item.title}
+                    className="w-full h-full"
+                    allow="autoplay"
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

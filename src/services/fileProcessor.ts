@@ -1,5 +1,17 @@
 import JSZip from "jszip";
 import type { BoardCategory, BoardColor, BoardItem } from "../components/SmartBoard";
+import {
+  buildPdf3DModelFromFile,
+  extractReadableTextFromPdf,
+  PDF_3D_THEME_META,
+} from "./pdf3dModelBuilder";
+import {
+  extractGoogleDriveFileIdFromUrl,
+  fetchDriveFileMetadataById,
+  extractDriveFileRealContent,
+  getAccessToken,
+  DriveFileItem,
+} from "./workspaceAuth";
 
 const DB_NAME = "iyey_or_files_db_v1";
 const STORE_NAME = "files";
@@ -32,12 +44,20 @@ function openFilesDb(): Promise<IDBDatabase> {
 }
 
 const memoryBlobUrls = new Map<string, string>();
+const memoryBlobs = new Map<string, { blob: Blob; name: string; mimeType: string }>();
 
-export async function saveFileToDb(id: string, file: File | Blob, fileName?: string): Promise<string> {
+export async function saveFileToDb(
+  id: string,
+  file: File | Blob,
+  fileName?: string,
+): Promise<string> {
   const name = fileName || (file instanceof File ? file.name : "file");
   const mimeType = file.type || guessMimeTypeFromName(name);
-  const blobUrl = URL.createObjectURL(file);
+  const typedBlob =
+    file.type === mimeType ? file : new Blob([file], { type: mimeType });
+  const blobUrl = URL.createObjectURL(typedBlob);
   memoryBlobUrls.set(id, blobUrl);
+  memoryBlobs.set(id, { blob: typedBlob, name, mimeType });
 
   try {
     const db = await openFilesDb();
@@ -48,8 +68,8 @@ export async function saveFileToDb(id: string, file: File | Blob, fileName?: str
         id,
         name,
         mimeType,
-        size: file.size,
-        blob: file,
+        size: typedBlob.size,
+        blob: typedBlob,
         createdAt: Date.now(),
       };
       store.put(rec);
@@ -68,16 +88,24 @@ export async function getFileBlobUrl(id: string): Promise<string | null> {
   }
   try {
     const db = await openFilesDb();
-    const record = await new Promise<StoredFileRecord | undefined>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly");
-      const store = tx.objectStore(STORE_NAME);
-      const req = store.get(id);
-      req.onsuccess = () => resolve(req.result as StoredFileRecord | undefined);
-      req.onerror = () => reject(req.error);
-    });
+    const record = await new Promise<StoredFileRecord | undefined>(
+      (resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get(id);
+        req.onsuccess = () =>
+          resolve(req.result as StoredFileRecord | undefined);
+        req.onerror = () => reject(req.error);
+      },
+    );
     if (record?.blob) {
       const url = URL.createObjectURL(record.blob);
       memoryBlobUrls.set(id, url);
+      memoryBlobs.set(id, {
+        blob: record.blob,
+        name: record.name,
+        mimeType: record.mimeType,
+      });
       return url;
     }
   } catch (err) {
@@ -86,7 +114,10 @@ export async function getFileBlobUrl(id: string): Promise<string | null> {
   return null;
 }
 
-export async function downloadStoredFile(id: string, fallbackName = "file"): Promise<void> {
+export async function downloadStoredFile(
+  id: string,
+  fallbackName = "file",
+): Promise<void> {
   const url = await getFileBlobUrl(id);
   if (!url) return;
   const a = document.createElement("a");
@@ -152,39 +183,157 @@ export function guessMimeTypeFromName(name: string): string {
 function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onload = () =>
+      resolve(typeof reader.result === "string" ? reader.result : "");
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
 }
 
+/**
+ * Smart Hebrew & Multilingual Text Reader:
+ * Automatically detects UTF-8, UTF-16LE/BE BOM, and Windows-1255 (Hebrew ANSI)
+ * so Hebrew .txt and .csv files from Windows never produce replacement characters!
+ */
+export async function readSmartHebrewText(file: Blob): Promise<string> {
+  try {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    if (bytes.length >= 2) {
+      if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+        return new TextDecoder("utf-16le").decode(bytes.subarray(2));
+      }
+      if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+        return new TextDecoder("utf-16be").decode(bytes.subarray(2));
+      }
+    }
+    try {
+      const strictUtf8 = new TextDecoder("utf-8", { fatal: true }).decode(
+        bytes,
+      );
+      return strictUtf8.replace(/^\uFEFF/, "");
+    } catch {
+      try {
+        return new TextDecoder("windows-1255").decode(bytes);
+      } catch {
+        return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+      }
+    }
+  } catch {
+    return await file.text();
+  }
+}
+
+function decodeXmlEntities(str: string): string {
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16)),
+    );
+}
+
 function stripXmlTags(xml: string): string {
   if (typeof DOMParser !== "undefined") {
     try {
-      const doc = new DOMParser().parseFromString(xml, "application/xml");
-      const textNodes: string[] = [];
-      const walk = (node: Node) => {
-        if (node.nodeType === Node.TEXT_NODE && node.nodeValue?.trim()) {
-          textNodes.push(node.nodeValue.trim());
-        }
-        node.childNodes.forEach(walk);
-      };
-      walk(doc);
-      if (textNodes.length > 0) {
-        return textNodes.join(" ");
+      const doc = new DOMParser().parseFromString(xml, "text/html");
+      const text = doc.body?.innerText || doc.documentElement?.textContent || "";
+      if (text.trim()) {
+        return text.replace(/\s+/g, " ").trim();
       }
     } catch {
       /* fallback to regex */
     }
   }
-  return xml
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return decodeXmlEntities(
+    xml
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim(),
+  );
 }
 
 /**
- * Extract real paragraphs from a .docx Word file using JSZip
+ * Extracts readable Hebrew & English text from legacy .doc, .ppt, .xls, or .rtf files
+ */
+async function extractLegacyOfficeOrRtfText(file: File): Promise<string[]> {
+  try {
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    const segments: string[] = [];
+
+    // 1. Check UTF-16LE runs (used by Microsoft Word .doc and PowerPoint .ppt)
+    let currentUtf16: string[] = [];
+    for (let i = 0; i + 1 < bytes.length; i += 2) {
+      const code = bytes[i] | (bytes[i + 1] << 8);
+      if (
+        (code >= 0x0590 && code <= 0x05ff) ||
+        (code >= 0x0020 && code <= 0x007e) ||
+        code === 0x000a ||
+        code === 0x000d
+      ) {
+        currentUtf16.push(
+          code === 0x000a || code === 0x000d
+            ? "\n"
+            : String.fromCharCode(code),
+        );
+      } else {
+        if (currentUtf16.length >= 6) {
+          const text = currentUtf16.join("").replace(/\s+/g, " ").trim();
+          if (
+            /[\u0590-\u05FF]{2,}/.test(text) ||
+            /[a-zA-Z]{4,}\s+[a-zA-Z]{3,}/.test(text)
+          ) {
+            if (
+              !/^(Microsoft|Normal|Default|Times New Roman|Arial|Calibri|PowerPoint|Word\.Document|SummaryInformation|Root Entry)/i.test(
+                text,
+              ) &&
+              !segments.includes(text)
+            ) {
+              segments.push(text);
+            }
+          }
+        }
+        currentUtf16 = [];
+      }
+      if (segments.length >= 30) break;
+    }
+
+    // 2. Check RTF or Windows-1255 / UTF-8 text runs
+    const rawStr = await readSmartHebrewText(file);
+    // Decode RTF hex escapes \'e0..\'fa (Windows-1255 Hebrew in RTF: 0xE0 = א = 0x05D0)
+    const rtfDecoded = rawStr.replace(/\\'([0-9a-fA-F]{2})/g, (_, hex) => {
+      const byteVal = parseInt(hex, 16);
+      if (byteVal >= 0xe0 && byteVal <= 0xfa) {
+        return String.fromCharCode(0x05d0 + (byteVal - 0xe0));
+      }
+      return " ";
+    });
+
+    const hebMatches =
+      rtfDecoded.match(
+        /[\u0590-\u05FF][\u0590-\u05FF0-9\s,.:;!?״׳()-]{6,260}/g,
+      ) || [];
+    for (const m of hebMatches) {
+      const clean = m.replace(/\s+/g, " ").trim();
+      if (clean.length >= 6 && !segments.includes(clean)) {
+        segments.push(clean);
+      }
+      if (segments.length >= 30) break;
+    }
+
+    return segments;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Extract real paragraphs from a .docx or .odt file using JSZip
  */
 async function extractDocxParagraphs(file: File): Promise<string[]> {
   try {
@@ -194,15 +343,19 @@ async function extractDocxParagraphs(file: File): Promise<string[]> {
     const xmlText = await docXmlFile.async("string");
     const paragraphs: string[] = [];
 
-    // Split by <w:p ...> or <text:p ...>
-    const pMatches = xmlText.match(/<(w:p|text:p)\b[^>]*>[\s\S]*?<\/(w:p|text:p)>/g) || [];
+    const pMatches =
+      xmlText.match(/<(w:p|text:p)\b[^>]*>[\s\S]*?<\/(w:p|text:p)>/g) || [];
     for (const pXml of pMatches) {
-      const tMatches = pXml.match(/<(w:t|text:span)\b[^>]*>([\s\S]*?)<\/(w:t|text:span)>/g) || [];
-      const line = tMatches
-        .map((t) => t.replace(/<[^>]+>/g, ""))
-        .join("")
-        .replace(/\s+/g, " ")
-        .trim();
+      const tMatches =
+        pXml.match(/<(w:t|text:span)\b[^>]*>([\s\S]*?)<\/(w:t|text:span)>/g) ||
+        [];
+      const line = decodeXmlEntities(
+        tMatches
+          .map((t) => t.replace(/<[^>]+>/g, ""))
+          .join("")
+          .replace(/\s+/g, " ")
+          .trim(),
+      );
       if (line) paragraphs.push(line);
     }
 
@@ -218,7 +371,7 @@ async function extractDocxParagraphs(file: File): Promise<string[]> {
 }
 
 /**
- * Extract real slides from a .pptx PowerPoint file using JSZip
+ * Extract real slides from a .pptx or .odp presentation file using JSZip
  */
 async function extractPptxSlides(
   file: File,
@@ -233,25 +386,27 @@ async function extractPptxSlides(
         return numA - numB;
       });
 
-    const slides: Array<{ slideNumber: number; title: string; content: string }> = [];
+    const slides: Array<{ slideNumber: number; title: string; content: string }> =
+      [];
     for (let i = 0; i < slideFiles.length; i++) {
       const path = slideFiles[i];
       const xmlText = await zip.files[path].async("string");
-      // Extract <a:p> paragraphs inside the slide
       const pBlocks = xmlText.match(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g) || [];
       const lines: string[] = [];
       for (const p of pBlocks) {
         const tMatches = p.match(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g) || [];
-        const line = tMatches
-          .map((t) => t.replace(/<[^>]+>/g, ""))
-          .join("")
-          .replace(/\s+/g, " ")
-          .trim();
+        const line = decodeXmlEntities(
+          tMatches
+            .map((t) => t.replace(/<[^>]+>/g, ""))
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim(),
+        );
         if (line) lines.push(line);
       }
       if (lines.length > 0) {
         const title = lines[0];
-        const content = lines.slice(1).join(" · ") || lines[0];
+        const content = lines.slice(1).join("\n") || lines[0];
         slides.push({
           slideNumber: i + 1,
           title,
@@ -280,10 +435,12 @@ async function extractXlsxTable(file: File): Promise<string[][]> {
       for (const si of siBlocks) {
         const tMatches = si.match(/<t\b[^>]*>([\s\S]*?)<\/t>/g) || [];
         sharedStrings.push(
-          tMatches
-            .map((t) => t.replace(/<[^>]+>/g, ""))
-            .join("")
-            .trim(),
+          decodeXmlEntities(
+            tMatches
+              .map((t) => t.replace(/<[^>]+>/g, ""))
+              .join("")
+              .trim(),
+          ),
         );
       }
     }
@@ -298,7 +455,7 @@ async function extractXlsxTable(file: File): Promise<string[][]> {
     const rowBlocks = sheetXml.match(/<row\b[^>]*>[\s\S]*?<\/row>/g) || [];
     const table: string[][] = [];
 
-    for (const rXml of rowBlocks.slice(0, 25)) {
+    for (const rXml of rowBlocks.slice(0, 30)) {
       const cells = rXml.match(/<c\b[^>]*>[\s\S]*?<\/c>/g) || [];
       const rowValues: string[] = [];
       for (const cXml of cells) {
@@ -306,7 +463,9 @@ async function extractXlsxTable(file: File): Promise<string[][]> {
         const vMatch = cXml.match(/<v>([\s\S]*?)<\/v>/);
         const inlineMatch = cXml.match(/<t\b[^>]*>([\s\S]*?)<\/t>/);
         if (inlineMatch) {
-          rowValues.push(inlineMatch[1].replace(/<[^>]+>/g, "").trim());
+          rowValues.push(
+            decodeXmlEntities(inlineMatch[1].replace(/<[^>]+>/g, "").trim()),
+          );
         } else if (vMatch) {
           const rawVal = vMatch[1].trim();
           if (isShared) {
@@ -339,8 +498,12 @@ export function parseCsvToTable(text: string): string[][] {
     .map((l) => l.trim())
     .filter(Boolean);
   if (lines.length === 0) return [];
-  const delimiter = lines[0].includes("\t") ? "\t" : ",";
-  return lines.slice(0, 25).map((line) =>
+  const delimiter = lines[0].includes("\t")
+    ? "\t"
+    : lines[0].includes(";") && !lines[0].includes(",")
+      ? ";"
+      : ",";
+  return lines.slice(0, 30).map((line) =>
     line
       .split(delimiter)
       .map((cell) => cell.replace(/^["']|["']$/g, "").trim()),
@@ -354,8 +517,8 @@ export interface ProcessedFileResult {
 
 /**
  * Universal Multi-Format File Processor:
- * Handles Images, PDFs, Audio, Video, PowerPoint (.pptx), Word (.docx),
- * Excel (.xlsx/.csv), JSON, HTML, Markdown, Text, ZIP, and ANY arbitrary file.
+ * Handles Images, PDFs, Audio, Video, PowerPoint (.pptx/.ppt), Word (.docx/.doc),
+ * Excel (.xlsx/.xls/.csv), JSON, HTML, Markdown, Text, RTF, ZIP, and ANY arbitrary file.
  */
 export async function processAnyFileToBoardItems(
   file: File,
@@ -378,20 +541,23 @@ export async function processAnyFileToBoardItems(
   };
   const baseColor = colorMap[category] || "emerald";
 
-  // Always save original file to IndexedDB so user can preview & download it anytime
+  // Always save original file to IndexedDB + memory so user can preview & download it anytime
   await saveFileToDb(fileDbId, file, file.name);
 
   // 1. IMAGE FILES (.png, .jpg, .jpeg, .gif, .webp, .svg, .bmp, .avif)
-  if (mime.startsWith("image/") || ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext)) {
+  if (
+    mime.startsWith("image/") ||
+    ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"].includes(ext)
+  ) {
     let previewDataUrl = "";
-    if (file.size <= 3.5 * 1024 * 1024) {
+    if (file.size <= 4 * 1024 * 1024) {
       previewDataUrl = await readAsDataUrl(file);
     }
     const item: BoardItem = {
       id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: "note",
       title: `🖼️ ${file.name}`,
-      content: `תמונה לימודית שהועלתה ללוח (${sizeLabel}). לחצו על התמונה להגדלה או להורדה.`,
+      content: `תמונה לימודית שהועלתה ללוח (${sizeLabel}). לחצו על התמונה להגדלה במסך מלא או להורדה.`,
       emoji: "🖼️",
       category,
       color: "cyan",
@@ -400,7 +566,7 @@ export async function processAnyFileToBoardItems(
       x: 60,
       y: 60,
       author: options.author,
-      sourceLabel: `תמונה (${ext.toUpperCase() || "IMG"})`,
+      sourceLabel: `תמונה (${ext.toUpperCase() || "IMG"} · ${sizeLabel})`,
       attachmentType: "image",
       fileDbId,
       fileName: file.name,
@@ -410,40 +576,65 @@ export async function processAnyFileToBoardItems(
     };
     return {
       items: [item],
-      summaryMessage: `התמונה "${file.name}" הועלתה ומוצגת כעת על לוח הלמידה!`,
+      summaryMessage: `התמונה "${file.name}" נקראה ומוצגת כעת על לוח הלמידה!`,
     };
   }
 
-  // 2. PDF DOCUMENTS (.pdf)
+  // 2. PDF DOCUMENTS (.pdf) -> Decompressed PDF Text Extraction + Live Viewer + 3D Model & 3D Quest!
   if (mime === "application/pdf" || ext === "pdf") {
+    const extractedSegments = await extractReadableTextFromPdf(file, file.name);
+    const pdf3dModel = await buildPdf3DModelFromFile(file, {
+      authorName: options.author,
+      category,
+      fileDbId,
+    });
+    const themeMeta = PDF_3D_THEME_META[pdf3dModel.theme];
+    const fullText =
+      extractedSegments.length > 0
+        ? extractedSegments.join("\n\n")
+        : pdf3dModel.nodes.map((n) => `${n.title}\n${n.fact}`).join("\n\n");
+
     const item: BoardItem = {
       id: `pdf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      type: "note",
-      title: `📕 ${file.name}`,
-      content: `מסמך PDF אינטראקטיבי (${sizeLabel}). ניתן לדפדף במסמך ישירות בתוך הכרטיסייה או לפתוח במסך מלא.`,
+      type: "flashcard",
+      title: `📕🧊 ${file.name}`,
+      content:
+        extractedSegments.length > 0
+          ? `📄 תוכן שנקרא מתוך ה-PDF:\n${extractedSegments.slice(0, 3).join(" · ").slice(0, 380)}`
+          : `${pdf3dModel.summary}\n✨ נוצר אוטומטית גם מודל תלת־ממדי חי (${themeMeta.name})!`,
+      answer: `לחצו על "פתח קורא קובץ מלא" לקריאת כל העמודים או על "שגר למעבדה 3D" כדי לחקור את המודל התלת־ממדי של "${file.name}"!`,
       emoji: "📕",
-      category,
+      category: pdf3dModel.category || category,
       color: "pink",
       fontSize: "normal",
       pinned: true,
       x: 65,
       y: 65,
       author: options.author,
-      sourceLabel: `מסמך PDF (${sizeLabel})`,
+      sourceLabel: `PDF + מודל 3D (${sizeLabel})`,
       attachmentType: "pdf",
       fileDbId,
       fileName: file.name,
       fileMimeType: "application/pdf",
       fileSizeLabel: sizeLabel,
+      pdf3dModelId: pdf3dModel.id,
+      fullExtractedText: fullText,
+      extractedSections:
+        extractedSegments.length > 0
+          ? extractedSegments
+          : pdf3dModel.nodes.map((n) => `${n.title}: ${n.fact}`),
     };
     return {
       items: [item],
-      summaryMessage: `מסמך ה-PDF "${file.name}" הוטמע עם מציג PDF חי על לוח הלמידה!`,
+      summaryMessage: `מסמך ה-PDF "${file.name}" נקרא במלואו, הוטמע בלוח ונוצר ממנו מודל תלת־ממדי חי (${themeMeta.name})!`,
     };
   }
 
   // 3. AUDIO FILES (.mp3, .wav, .ogg, .m4a, .aac, .flac)
-  if (mime.startsWith("audio/") || ["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(ext)) {
+  if (
+    mime.startsWith("audio/") ||
+    ["mp3", "wav", "ogg", "m4a", "aac", "flac"].includes(ext)
+  ) {
     const item: BoardItem = {
       id: `aud-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: "note",
@@ -471,7 +662,10 @@ export async function processAnyFileToBoardItems(
   }
 
   // 4. VIDEO FILES (.mp4, .webm, .mov, .mkv, .avi)
-  if (mime.startsWith("video/") || ["mp4", "webm", "mov", "mkv", "avi"].includes(ext)) {
+  if (
+    mime.startsWith("video/") ||
+    ["mp4", "webm", "mov", "mkv", "avi"].includes(ext)
+  ) {
     const item: BoardItem = {
       id: `vid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: "note",
@@ -499,18 +693,40 @@ export async function processAnyFileToBoardItems(
   }
 
   // 5. POWERPOINT PRESENTATIONS (.pptx, .ppt, .odp)
-  if (ext === "pptx" || ext === "odp" || mime.includes("presentation")) {
-    const slides = await extractPptxSlides(file);
+  if (
+    ext === "pptx" ||
+    ext === "ppt" ||
+    ext === "odp" ||
+    mime.includes("presentation") ||
+    mime.includes("powerpoint")
+  ) {
+    let slides = await extractPptxSlides(file);
+    if (slides.length === 0) {
+      const legacy = await extractLegacyOfficeOrRtfText(file);
+      slides = legacy.slice(0, 12).map((text, idx) => ({
+        slideNumber: idx + 1,
+        title: `שקופית ${idx + 1}`,
+        content: text,
+      }));
+    }
+
+    const allSlideSections = slides.map(
+      (s) => `שקופית ${s.slideNumber} — ${s.title}:\n${s.content}`,
+    );
+    const fullText = allSlideSections.join("\n\n");
+
     if (slides.length > 0 && (options.splitIntoSlides ?? true)) {
       const createdSlides: BoardItem[] = slides.slice(0, 12).map((sl, idx) => ({
         id: `pptx-${Date.now()}-${idx}`,
         type: "flashcard",
         title: `📊 שְׁקוּפִית ${sl.slideNumber}: ${sl.title.slice(0, 75)}`,
-        content: sl.content.slice(0, 420),
-        answer: `שקופית ${sl.slideNumber} מתוך המצגת "${file.name}"`,
+        content: sl.content.slice(0, 480),
+        answer: `שקופית ${sl.slideNumber} מתוך ${slides.length} במצגת "${file.name}"`,
         emoji: "📊",
         category,
-        color: (["cyan", "amber", "emerald", "violet", "pink"][idx % 5] as BoardColor),
+        color: (["cyan", "amber", "emerald", "violet", "pink"][
+          idx % 5
+        ] as BoardColor),
         fontSize: "normal",
         pinned: idx === 0,
         x: 50 + idx * 18,
@@ -522,17 +738,22 @@ export async function processAnyFileToBoardItems(
         fileName: file.name,
         fileMimeType: mime,
         fileSizeLabel: sizeLabel,
+        fullExtractedText: fullText,
+        extractedSections: allSlideSections,
       }));
       return {
         items: createdSlides,
-        summaryMessage: `המצגת "${file.name}" פורקה בהצלחה ל-${createdSlides.length} שקופיות אינטראקטיביות על הלוח!`,
+        summaryMessage: `המצגת "${file.name}" נקראה ופורקה ל-${createdSlides.length} שקופיות חיות על הלוח!`,
       };
     }
 
     const summaryText =
       slides.length > 0
-        ? slides.map((s) => `שקופית ${s.slideNumber}: ${s.title} — ${s.content}`).join(" | ").slice(0, 500)
-        : `קובץ מצגת PowerPoint (${sizeLabel}) מוכן להורדה ולהצגה בכיתה.`;
+        ? slides
+            .map((s) => `שקופית ${s.slideNumber}: ${s.title} — ${s.content}`)
+            .join("\n")
+            .slice(0, 500)
+        : `קובץ מצגת PowerPoint (${sizeLabel}) מוכן לקריאה ולהצגה בכיתה.`;
     return {
       items: [
         {
@@ -548,27 +769,42 @@ export async function processAnyFileToBoardItems(
           x: 60,
           y: 60,
           author: options.author,
-          sourceLabel: `מצגת (${ext.toUpperCase()})`,
+          sourceLabel: `מצגת (${ext.toUpperCase()} · ${sizeLabel})`,
           attachmentType: "document",
           fileDbId,
           fileName: file.name,
           fileMimeType: mime,
           fileSizeLabel: sizeLabel,
+          fullExtractedText: fullText || summaryText,
+          extractedSections:
+            allSlideSections.length > 0 ? allSlideSections : [summaryText],
         },
       ],
-      summaryMessage: `המצגת "${file.name}" הועלתה ללוח הלמידה!`,
+      summaryMessage: `המצגת "${file.name}" נקראה והועלתה ללוח הלמידה!`,
     };
   }
 
-  // 6. WORD DOCUMENTS (.docx, .doc, .odt)
-  if (ext === "docx" || ext === "odt" || mime.includes("wordprocessingml")) {
-    const paragraphs = await extractDocxParagraphs(file);
+  // 6. WORD DOCUMENTS (.docx, .doc, .odt, .rtf)
+  if (
+    ext === "docx" ||
+    ext === "doc" ||
+    ext === "odt" ||
+    ext === "rtf" ||
+    mime.includes("word") ||
+    mime.includes("rtf")
+  ) {
+    let paragraphs =
+      ext === "docx" || ext === "odt" ? await extractDocxParagraphs(file) : [];
+    if (paragraphs.length === 0) {
+      paragraphs = await extractLegacyOfficeOrRtfText(file);
+    }
+    const fullText = paragraphs.join("\n\n");
+
     if (paragraphs.length > 1 && options.splitIntoSlides) {
-      // Group paragraphs into slide chunks
       const chunks: string[] = [];
       let current = "";
       for (const p of paragraphs) {
-        if ((current + " " + p).length > 260 && current) {
+        if ((current + " " + p).length > 320 && current) {
           chunks.push(current.trim());
           current = p;
         } else {
@@ -590,30 +826,32 @@ export async function processAnyFileToBoardItems(
         x: 55 + idx * 15,
         y: 55 + idx * 15,
         author: options.author,
-        sourceLabel: `מסמך Word (${file.name})`,
+        sourceLabel: `מסמך (${file.name})`,
         attachmentType: "document",
         fileDbId,
         fileName: file.name,
         fileMimeType: mime,
         fileSizeLabel: sizeLabel,
+        fullExtractedText: fullText || chunk,
+        extractedSections: chunks,
       }));
       return {
         items,
-        summaryMessage: `מסמך ה-Word "${file.name}" נקרא ופוצל ל-${items.length} כרטיסיות תוכן על הלוח!`,
+        summaryMessage: `המסמך "${file.name}" נקרא במלואו ופוצל ל-${items.length} כרטיסיות תוכן על הלוח!`,
       };
     }
 
-    const fullText =
+    const summaryContent =
       paragraphs.length > 0
-        ? paragraphs.join(" · ").slice(0, 520)
-        : `מסמך Word לימודי (${sizeLabel}) זמין להורדה ולצפייה.`;
+        ? paragraphs.slice(0, 6).join("\n").slice(0, 520)
+        : `מסמך לימודי (${sizeLabel}) זמין לקריאה ולהורדה.`;
     return {
       items: [
         {
           id: `docx-${Date.now()}`,
           type: "note",
           title: `📝 ${file.name}`,
-          content: fullText,
+          content: summaryContent,
           emoji: "📄",
           category,
           color: baseColor,
@@ -622,25 +860,33 @@ export async function processAnyFileToBoardItems(
           x: 60,
           y: 60,
           author: options.author,
-          sourceLabel: `מסמך Word (${sizeLabel})`,
+          sourceLabel: `מסמך (${ext.toUpperCase()} · ${sizeLabel})`,
           attachmentType: "document",
           fileDbId,
           fileName: file.name,
           fileMimeType: mime,
           fileSizeLabel: sizeLabel,
+          fullExtractedText: fullText || summaryContent,
+          extractedSections:
+            paragraphs.length > 0 ? paragraphs : [summaryContent],
         },
       ],
-      summaryMessage: `מסמך ה-Word "${file.name}" חולץ ונוסף ללוח הלמידה!`,
+      summaryMessage: `המסמך "${file.name}" נקרא ונוסף עם קורא מסמכים חי ללוח הלמידה!`,
     };
   }
 
   // 7. EXCEL / SPREADSHEET / CSV / TSV (.xlsx, .xls, .csv, .tsv, .ods)
-  if (["xlsx", "xls", "csv", "tsv", "ods"].includes(ext) || mime.includes("spreadsheet") || mime === "text/csv") {
+  if (
+    ["xlsx", "xls", "csv", "tsv", "ods"].includes(ext) ||
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    mime === "text/csv"
+  ) {
     let tableData: string[][] = [];
-    if (ext === "xlsx") {
+    if (ext === "xlsx" || ext === "ods") {
       tableData = await extractXlsxTable(file);
     } else {
-      const text = await file.text();
+      const text = await readSmartHebrewText(file);
       tableData = parseCsvToTable(text);
     }
     const rowCount = tableData.length;
@@ -648,6 +894,10 @@ export async function processAnyFileToBoardItems(
       rowCount > 0
         ? `טבלת נתונים חיה (${rowCount} שורות): ${tableData[0].join(" | ")}`
         : `גיליון נתונים (${sizeLabel})`;
+    const fullText =
+      rowCount > 0
+        ? tableData.map((r) => r.join("  |  ")).join("\n")
+        : previewSummary;
 
     const item: BoardItem = {
       id: `tbl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -662,25 +912,41 @@ export async function processAnyFileToBoardItems(
       x: 60,
       y: 60,
       author: options.author,
-      sourceLabel: `גיליון נתונים (${ext.toUpperCase()})`,
+      sourceLabel: `גיליון נתונים (${ext.toUpperCase()} · ${rowCount} שורות)`,
       attachmentType: "table",
-      tableData: tableData.length > 0 ? tableData.slice(0, 12) : undefined,
+      tableData: tableData.length > 0 ? tableData.slice(0, 20) : undefined,
       fileDbId,
       fileName: file.name,
       fileMimeType: mime,
       fileSizeLabel: sizeLabel,
+      fullExtractedText: fullText,
     };
     return {
       items: [item],
-      summaryMessage: `גיליון הנתונים "${file.name}" (${rowCount} שורות) הועלה כטבלה חיה ללוח הלמידה!`,
+      summaryMessage: `גיליון הנתונים "${file.name}" (${rowCount} שורות) נקרא והועלה כטבלה חיה ללוח הלמידה!`,
     };
   }
 
-  // 8. ZIP ARCHIVES (.zip)
+  // 8. ZIP ARCHIVES (.zip) -> Also extract readable text files inside the ZIP!
   if (ext === "zip" || mime === "application/zip") {
     try {
       const zip = await JSZip.loadAsync(file);
-      const entryNames = Object.keys(zip.files).filter((k) => !zip.files[k].dir);
+      const entryNames = Object.keys(zip.files).filter(
+        (k) => !zip.files[k].dir,
+      );
+      const extractedZipNotes: string[] = [
+        `קבצים בארכיון (${entryNames.length}): ${entryNames.join(", ")}`,
+      ];
+      for (const entryName of entryNames.slice(0, 5)) {
+        if (/\.(txt|md|csv|json|html)$/i.test(entryName)) {
+          const txt = await zip.files[entryName].async("string");
+          if (txt.trim()) {
+            extractedZipNotes.push(
+              `--- ${entryName} ---\n${txt.trim().slice(0, 600)}`,
+            );
+          }
+        }
+      }
       const item: BoardItem = {
         id: `zip-${Date.now()}`,
         type: "note",
@@ -702,50 +968,79 @@ export async function processAnyFileToBoardItems(
         fileName: file.name,
         fileMimeType: mime,
         fileSizeLabel: sizeLabel,
+        fullExtractedText: extractedZipNotes.join("\n\n"),
+        extractedSections: extractedZipNotes,
       };
       return {
         items: [item],
-        summaryMessage: `ארכיון ה-ZIP "${file.name}" (${entryNames.length} קבצים) הועלה ללוח!`,
+        summaryMessage: `ארכיון ה-ZIP "${file.name}" (${entryNames.length} קבצים) נקרא והועלה ללוח!`,
       };
     } catch {
       /* continue to generic handler */
     }
   }
 
-  // 9. TEXT / MARKDOWN / JSON / HTML / XML / CODE
-  if (
+  // 9. TEXT / MARKDOWN / JSON / HTML / XML / CODE (and any text-readable file)
+  const rawText = await readSmartHebrewText(file);
+  const looksLikeReadableText =
     mime.startsWith("text/") ||
-    ["txt", "md", "json", "html", "htm", "xml", "rtf", "js", "ts", "py", "css"].includes(ext)
-  ) {
-    const rawText = await file.text();
+    [
+      "txt",
+      "md",
+      "json",
+      "html",
+      "htm",
+      "xml",
+      "js",
+      "ts",
+      "tsx",
+      "py",
+      "css",
+      "log",
+      "ini",
+      "yaml",
+      "yml",
+    ].includes(ext) ||
+    /[\u0590-\u05FF]{3,}|[a-zA-Z]{5,}/.test(rawText.slice(0, 500));
 
+  if (looksLikeReadableText && rawText.trim().length > 0) {
     // Check if JSON is a board export or array of items
     if (ext === "json") {
       try {
         const parsed = JSON.parse(rawText);
-        if (Array.isArray(parsed.smartBoardItems) && parsed.smartBoardItems.length > 0) {
+        if (
+          Array.isArray(parsed.smartBoardItems) &&
+          parsed.smartBoardItems.length > 0
+        ) {
           return {
             items: parsed.smartBoardItems,
             summaryMessage: `שוחזרו ${parsed.smartBoardItems.length} כרטיסיות מתוך קובץ הגיבוי "${file.name}"!`,
           };
         }
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].title && parsed[0].content) {
-          const imported: BoardItem[] = parsed.slice(0, 15).map((entry: Record<string, unknown>, i: number) => ({
-            id: `json-${Date.now()}-${i}`,
-            type: entry.answer ? "flashcard" : "note",
-            title: String(entry.title || `פריט ${i + 1}`),
-            content: String(entry.content || ""),
-            answer: entry.answer ? String(entry.answer) : undefined,
-            emoji: String(entry.emoji || "📌"),
-            category: (entry.category as BoardCategory) || category,
-            color: baseColor,
-            fontSize: "normal",
-            pinned: i === 0,
-            x: 50 + i * 15,
-            y: 50 + i * 15,
-            author: options.author,
-            sourceLabel: `יובא מ-${file.name}`,
-          }));
+        if (
+          Array.isArray(parsed) &&
+          parsed.length > 0 &&
+          parsed[0].title &&
+          parsed[0].content
+        ) {
+          const imported: BoardItem[] = parsed
+            .slice(0, 15)
+            .map((entry: Record<string, unknown>, i: number) => ({
+              id: `json-${Date.now()}-${i}`,
+              type: entry.answer ? "flashcard" : "note",
+              title: String(entry.title || `פריט ${i + 1}`),
+              content: String(entry.content || ""),
+              answer: entry.answer ? String(entry.answer) : undefined,
+              emoji: String(entry.emoji || "📌"),
+              category: (entry.category as BoardCategory) || category,
+              color: baseColor,
+              fontSize: "normal",
+              pinned: i === 0,
+              x: 50 + i * 15,
+              y: 50 + i * 15,
+              author: options.author,
+              sourceLabel: `יובא מ-${file.name}`,
+            }));
           return {
             items: imported,
             summaryMessage: `יובאו ${imported.length} כרטיסיות מתוך הקובץ "${file.name}"!`,
@@ -758,53 +1053,64 @@ export async function processAnyFileToBoardItems(
 
     const cleanText =
       ext === "html" || ext === "htm"
-        ? stripXmlTags(rawText.replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, ""))
-        : rawText.trim();
+        ? stripXmlTags(
+            rawText
+              .replace(/<script[\s\S]*?<\/script>/gi, "")
+              .replace(/<style[\s\S]*?<\/style>/gi, ""),
+          )
+        : rawText.replace(/\0/g, "").trim();
 
-    if (options.splitIntoSlides) {
-      const blocks = cleanText
-        .split(/\n{2,}|(?=^#{1,3}\s)/m)
-        .map((b) => b.trim())
-        .filter(Boolean);
-      if (blocks.length > 1) {
-        const items: BoardItem[] = blocks.slice(0, 10).map((b, idx) => {
-          const lines = b.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-          const heading = lines[0]?.replace(/^#+\s*/, "") || `${file.name} - חלק ${idx + 1}`;
-          const body = lines.slice(1).join(" · ") || heading;
-          return {
-            id: `txt-${Date.now()}-${idx}`,
-            type: "flashcard",
-            title: `📑 ${heading.slice(0, 75)}`,
-            content: body.slice(0, 420),
-            answer: `מתוך הקובץ "${file.name}" (שקופית ${idx + 1})`,
-            emoji: "📑",
-            category,
-            color: (["cyan", "emerald", "amber", "violet", "pink"][idx % 5] as BoardColor),
-            fontSize: "normal",
-            pinned: idx === 0,
-            x: 50 + idx * 16,
-            y: 50 + idx * 16,
-            author: options.author,
-            sourceLabel: file.name,
-            attachmentType: "document",
-            fileDbId,
-            fileName: file.name,
-            fileMimeType: mime,
-            fileSizeLabel: sizeLabel,
-          };
-        });
+    const blocks = cleanText
+      .split(/\n{2,}|(?=^#{1,3}\s)/m)
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    if (options.splitIntoSlides && blocks.length > 1) {
+      const items: BoardItem[] = blocks.slice(0, 10).map((b, idx) => {
+        const lines = b
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const heading =
+          lines[0]?.replace(/^#+\s*/, "") || `${file.name} - חלק ${idx + 1}`;
+        const body = lines.slice(1).join("\n") || heading;
         return {
-          items,
-          summaryMessage: `הקובץ "${file.name}" פוצל ל-${items.length} כרטיסיות לימוד על הלוח!`,
+          id: `txt-${Date.now()}-${idx}`,
+          type: "flashcard",
+          title: `📑 ${heading.slice(0, 75)}`,
+          content: body.slice(0, 460),
+          answer: `מתוך הקובץ "${file.name}" (חלק ${idx + 1} מתוך ${blocks.length})`,
+          emoji: "📑",
+          category,
+          color: (["cyan", "emerald", "amber", "violet", "pink"][
+            idx % 5
+          ] as BoardColor),
+          fontSize: "normal",
+          pinned: idx === 0,
+          x: 50 + idx * 16,
+          y: 50 + idx * 16,
+          author: options.author,
+          sourceLabel: `${file.name} (${sizeLabel})`,
+          attachmentType: "document",
+          fileDbId,
+          fileName: file.name,
+          fileMimeType: mime,
+          fileSizeLabel: sizeLabel,
+          fullExtractedText: cleanText.slice(0, 10000),
+          extractedSections: blocks,
         };
-      }
+      });
+      return {
+        items,
+        summaryMessage: `הקובץ "${file.name}" נקרא ופוצל ל-${items.length} כרטיסיות תוכן על הלוח!`,
+      };
     }
 
     const item: BoardItem = {
       id: `txt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       type: "note",
       title: `📄 ${file.name}`,
-      content: cleanText.slice(0, 500) || `קובץ טקסט (${sizeLabel})`,
+      content: cleanText.slice(0, 550) || `קובץ טקסט (${sizeLabel})`,
       emoji: "📄",
       category,
       color: baseColor,
@@ -813,25 +1119,33 @@ export async function processAnyFileToBoardItems(
       x: 60,
       y: 60,
       author: options.author,
-      sourceLabel: `קובץ (${ext.toUpperCase() || "TXT"})`,
+      sourceLabel: `קובץ (${ext.toUpperCase() || "TXT"} · ${sizeLabel})`,
       attachmentType: "document",
       fileDbId,
       fileName: file.name,
       fileMimeType: mime,
       fileSizeLabel: sizeLabel,
+      fullExtractedText: cleanText.slice(0, 10000),
+      extractedSections: blocks.length > 0 ? blocks : [cleanText],
     };
     return {
       items: [item],
-      summaryMessage: `הקובץ "${file.name}" נקרא ונוסף ללוח הלמידה!`,
+      summaryMessage: `הקובץ "${file.name}" נקרא במלואו ונוסף ללוח הלמידה!`,
     };
   }
 
-  // 10. FALLBACK FOR ANY OTHER FILE FORMAT (*.*)
+  // 10. FALLBACK FOR ANY OTHER BINARY FILE FORMAT (*.*)
+  const legacySegments = await extractLegacyOfficeOrRtfText(file);
+  const fallbackText =
+    legacySegments.length > 0
+      ? legacySegments.join("\n\n")
+      : `קובץ מצורף מסוג ${ext.toUpperCase() || mime} (${sizeLabel}). לחצו על "פתח קורא קובץ" או "הורד קובץ מקור".`;
+
   const fallbackItem: BoardItem = {
     id: `any-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     type: "note",
     title: `📎 ${file.name}`,
-    content: `קובץ מצורף מסוג ${ext.toUpperCase() || mime} (${sizeLabel}). לחצו על כפתור ההורדה/פתיחה למטה כדי לפתוח את הקובץ.`,
+    content: fallbackText.slice(0, 500),
     emoji: "📎",
     category,
     color: baseColor,
@@ -846,11 +1160,96 @@ export async function processAnyFileToBoardItems(
     fileName: file.name,
     fileMimeType: mime,
     fileSizeLabel: sizeLabel,
+    fullExtractedText: fallbackText,
+    extractedSections:
+      legacySegments.length > 0 ? legacySegments : [fallbackText],
   };
 
   return {
     items: [fallbackItem],
-    summaryMessage: `הקובץ "${file.name}" (${sizeLabel}) הועלה וצורף ללוח הלמידה!`,
+    summaryMessage: `הקובץ "${file.name}" (${sizeLabel}) נקרא וצורף ללוח הלמידה!`,
+  };
+}
+
+/**
+ * Helper to convert a Google Drive File (`DriveFileItem`) into one or more rich `BoardItem`s,
+ * downloading and parsing PDF/DOCX/PPTX/XLSX/Images if binary, or exporting Google Docs/Slides/Sheets.
+ */
+export async function processDriveFileItemToBoardItems(
+  accessToken: string,
+  df: DriveFileItem,
+  options: {
+    author: string;
+    category: BoardCategory;
+    splitIntoSlides?: boolean;
+  },
+): Promise<ProcessedFileResult> {
+  const extracted = await extractDriveFileRealContent(accessToken, df);
+
+  // If it's a downloadable binary (PDF, Word, PowerPoint, Excel, Image, Audio, Video), run it through our universal processor!
+  if (extracted.downloadedFile) {
+    const processed = await processAnyFileToBoardItems(
+      extracted.downloadedFile,
+      {
+        author: options.author,
+        category: options.category,
+        splitIntoSlides: options.splitIntoSlides,
+      },
+    );
+    const enrichedItems = processed.items.map((it) => ({
+      ...it,
+      externalUrl:
+        df.webViewLink || `https://drive.google.com/file/d/${df.id}/view`,
+      embedIframeUrl: it.embedIframeUrl || extracted.embedIframeUrl,
+      sourceLabel: `Google Drive חי (${df.name})`,
+    }));
+    return {
+      items: enrichedItems,
+      summaryMessage: `הקובץ "${df.name}" יובא מ-Google Drive, נקרא במלואו ונוסף ללוח החכם!`,
+    };
+  }
+
+  const sections = extracted.fullText
+    ? extracted.fullText
+        .split(/\n{2,}/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [extracted.extractedText];
+
+  const newItem: BoardItem = {
+    id: `drive-${df.id}-${Date.now()}`,
+    type: "note",
+    title: `☁️ ${df.name}`,
+    content: extracted.extractedText,
+    emoji: df.mimeType.includes("presentation")
+      ? "📊"
+      : df.mimeType.includes("spreadsheet")
+        ? "📈"
+        : df.mimeType.includes("document")
+          ? "📝"
+          : "📁",
+    category: options.category,
+    color: "cyan",
+    fontSize: "normal",
+    pinned: true,
+    x: 70,
+    y: 70,
+    author: options.author,
+    externalUrl:
+      df.webViewLink || `https://drive.google.com/file/d/${df.id}/view`,
+    embedIframeUrl: extracted.embedIframeUrl,
+    tableData: extracted.tableData,
+    fileName: df.name,
+    fileMimeType: df.mimeType,
+    sourceLabel: "Google Drive חי",
+    attachmentType: extracted.tableData ? "table" : "document",
+    fullExtractedText: extracted.fullText || extracted.extractedText,
+    extractedSections: sections,
+  };
+
+  return {
+    items: [newItem],
+    summaryMessage: `"${df.name}" יובא מ-Google Drive עם תוכן חי ותצוגה מקדימה אל הלוח החכם!`,
   };
 }
 
@@ -868,14 +1267,20 @@ export function createBoardItemFromExternalLink(params: {
 }): BoardItem | null {
   const rawUrl = params.url.trim();
   if (!rawUrl) return null;
-  const normalizedUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
+  const normalizedUrl = /^https?:\/\//i.test(rawUrl)
+    ? rawUrl
+    : `https://${rawUrl}`;
 
   // 1. Check YouTube
   let ytId: string | null = null;
   const shortMatch = normalizedUrl.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
   const watchMatch = normalizedUrl.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
-  const shortsMatch = normalizedUrl.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/);
-  const embedMatch = normalizedUrl.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/);
+  const shortsMatch = normalizedUrl.match(
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/,
+  );
+  const embedMatch = normalizedUrl.match(
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/,
+  );
   if (shortMatch) ytId = shortMatch[1];
   else if (watchMatch) ytId = watchMatch[1];
   else if (shortsMatch) ytId = shortsMatch[1];
@@ -907,10 +1312,10 @@ export function createBoardItemFromExternalLink(params: {
     };
   }
 
-  // 2. Check Google Drive / Docs / Slides / Sheets / Forms
-  const driveFileMatch = normalizedUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  const docsMatch = normalizedUrl.match(/docs\.google\.com\/(document|presentation|spreadsheets|forms)\/d\/([a-zA-Z0-9_-]+)/);
-
+  // 2. Check Google Docs / Slides / Sheets / Forms / Drive (any URL format!)
+  const docsMatch = normalizedUrl.match(
+    /docs\.google\.com\/(document|presentation|spreadsheets|forms)\/d\/([a-zA-Z0-9_-]{10,})/,
+  );
   if (docsMatch) {
     const docType = docsMatch[1];
     const docId = docsMatch[2];
@@ -932,8 +1337,13 @@ export function createBoardItemFromExternalLink(params: {
       title: `☁️ ${params.title?.trim() || typeLabel}`,
       content:
         params.questionOrNotes?.trim() ||
-        `${typeLabel} מוטמע חי על הלוח. ניתן לעיין בתוכן ישירות או לפתוח בחלון חדש.`,
-      emoji: docType === "presentation" ? "📊" : docType === "spreadsheets" ? "📉" : "📄",
+        `${typeLabel} מחובר ומוטמע חי על הלוח. ניתן לעיין בתוכן ישירות בכרטיסייה או במסך מלא.`,
+      emoji:
+        docType === "presentation"
+          ? "📊"
+          : docType === "spreadsheets"
+            ? "📉"
+            : "📄",
       category: params.category,
       color: "cyan",
       fontSize: "normal",
@@ -944,19 +1354,27 @@ export function createBoardItemFromExternalLink(params: {
       embedIframeUrl: previewUrl,
       externalUrl: normalizedUrl,
       sourceLabel: typeLabel,
+      attachmentType: "document",
     };
   }
 
-  if (driveFileMatch) {
-    const fileId = driveFileMatch[1];
-    const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
+  const driveId = extractGoogleDriveFileIdFromUrl(normalizedUrl);
+  if (
+    driveId &&
+    (normalizedUrl.includes("drive.google.com") ||
+      normalizedUrl.includes("docs.google.com"))
+  ) {
+    const isFolder = normalizedUrl.includes("/folders/");
+    const previewUrl = isFolder
+      ? `https://drive.google.com/embeddedfolderview?id=${driveId}#grid`
+      : `https://drive.google.com/file/d/${driveId}/preview`;
     return {
       id: `gdrive-${Date.now()}`,
       type: "note",
-      title: `☁️ ${params.title?.trim() || "קובץ מ-Google Drive"}`,
+      title: `☁️ ${params.title?.trim() || (isFolder ? "תיקיית Google Drive" : "קובץ מ-Google Drive")}`,
       content:
         params.questionOrNotes?.trim() ||
-        "קובץ מוטמע מתוך Google Drive. ניתן לצפות בתצוגה המקדימה החיה בכרטיסייה.",
+        "משאב מחובר מתוך Google Drive. ניתן לצפות בתצוגה המקדימה החיה בכרטיסייה או במסך מלא.",
       emoji: "📁",
       category: params.category,
       color: "cyan",
@@ -968,6 +1386,7 @@ export function createBoardItemFromExternalLink(params: {
       embedIframeUrl: previewUrl,
       externalUrl: normalizedUrl,
       sourceLabel: "Google Drive",
+      attachmentType: "document",
     };
   }
 
@@ -977,7 +1396,8 @@ export function createBoardItemFromExternalLink(params: {
       id: `link-img-${Date.now()}`,
       type: "note",
       title: `🖼️ ${params.title?.trim() || "תמונה מהרשת"}`,
-      content: params.questionOrNotes?.trim() || "תמונה לימודית מתוך קישור ישיר.",
+      content:
+        params.questionOrNotes?.trim() || "תמונה לימודית מתוך קישור ישיר.",
       emoji: "🖼️",
       category: params.category,
       color: "cyan",
@@ -999,7 +1419,8 @@ export function createBoardItemFromExternalLink(params: {
       id: `link-pdf-${Date.now()}`,
       type: "note",
       title: `📕 ${params.title?.trim() || "מסמך PDF מקישור"}`,
-      content: params.questionOrNotes?.trim() || "מסמך PDF מתוך קישור חיצוני.",
+      content:
+        params.questionOrNotes?.trim() || "מסמך PDF מתוך קישור חיצוני.",
       emoji: "📕",
       category: params.category,
       color: "pink",
@@ -1011,6 +1432,7 @@ export function createBoardItemFromExternalLink(params: {
       embedIframeUrl: normalizedUrl,
       externalUrl: normalizedUrl,
       sourceLabel: "PDF מקישור",
+      attachmentType: "pdf",
     };
   }
 
@@ -1021,7 +1443,7 @@ export function createBoardItemFromExternalLink(params: {
     title: `🔗 ${params.title?.trim() || normalizedUrl}`,
     content:
       params.questionOrNotes?.trim() ||
-      `קישור לימודי מצורף: ${normalizedUrl}. לחצו על הכפתור לפתיחת המשאב.`,
+      `קישור לימודי מחובר: ${normalizedUrl}. לחצו לפתיחת המשאב או לתצוגה מקדימה.`,
     emoji: "🌐",
     category: params.category,
     color: "violet",
@@ -1033,4 +1455,47 @@ export function createBoardItemFromExternalLink(params: {
     externalUrl: normalizedUrl,
     sourceLabel: "קישור חיצוני",
   };
+}
+
+/**
+ * Async version of External Link Converter:
+ * If the pasted URL is a Google Drive / Docs / Slides / Sheets link and the user has
+ * an active Google OAuth token (or signs in), it automatically fetches the real file metadata
+ * and content from Google Drive!
+ */
+export async function createBoardItemFromExternalLinkAsync(params: {
+  url: string;
+  title?: string;
+  questionOrNotes?: string;
+  category: BoardCategory;
+  author: string;
+}): Promise<BoardItem | null> {
+  const baseItem = createBoardItemFromExternalLink(params);
+  if (!baseItem) return null;
+
+  const driveId = extractGoogleDriveFileIdFromUrl(params.url);
+  const token = await getAccessToken();
+  if (driveId && token && !params.url.includes("/folders/")) {
+    const meta = await fetchDriveFileMetadataById(token, driveId);
+    if (meta) {
+      const processed = await processDriveFileItemToBoardItems(token, meta, {
+        author: params.author,
+        category: params.category,
+        splitIntoSlides: false,
+      });
+      if (processed.items.length > 0) {
+        const enriched = processed.items[0];
+        return {
+          ...enriched,
+          title: params.title?.trim()
+            ? `☁️ ${params.title.trim()}`
+            : enriched.title,
+          content: params.questionOrNotes?.trim()
+            ? `${params.questionOrNotes.trim()}\n\n${enriched.content}`
+            : enriched.content,
+        };
+      }
+    }
+  }
+  return baseItem;
 }
