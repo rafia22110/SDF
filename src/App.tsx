@@ -408,6 +408,7 @@ export default function App() {
               handleSelectIsland(islandId);
               setActiveTab("islands");
             }}
+            onSwitchToBoard={() => setActiveTab("board")}
           />
         )}
       </main>

@@ -81,14 +81,23 @@ export interface DriveFileItem {
   name: string;
   mimeType: string;
   webViewLink?: string;
+  iconLink?: string;
+  thumbnailLink?: string;
+  size?: string;
   modifiedTime?: string;
 }
 
 export async function fetchDriveFiles(
   accessToken: string,
+  searchQuery?: string,
 ): Promise<DriveFileItem[]> {
-  const url =
-    "https://www.googleapis.com/drive/v3/files?pageSize=12&fields=files(id,name,mimeType,webViewLink,modifiedTime)";
+  const qParts = ["trashed = false"];
+  if (searchQuery && searchQuery.trim()) {
+    const escaped = searchQuery.trim().replace(/'/g, "\\'");
+    qParts.push(`name contains '${escaped}'`);
+  }
+  const qParam = encodeURIComponent(qParts.join(" and "));
+  const url = `https://www.googleapis.com/drive/v3/files?pageSize=24&q=${qParam}&orderBy=modifiedTime desc&fields=files(id,name,mimeType,webViewLink,iconLink,thumbnailLink,size,modifiedTime)`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -97,6 +106,98 @@ export async function fetchDriveFiles(
   }
   const data = (await res.json()) as { files?: DriveFileItem[] };
   return data.files || [];
+}
+
+export async function extractDriveFileRealContent(
+  accessToken: string,
+  df: DriveFileItem,
+): Promise<{
+  extractedText: string;
+  embedIframeUrl: string;
+  tableData?: string[][];
+}> {
+  let embedIframeUrl = `https://drive.google.com/file/d/${df.id}/preview`;
+  if (df.mimeType === "application/vnd.google-apps.document") {
+    embedIframeUrl = `https://docs.google.com/document/d/${df.id}/preview`;
+  } else if (df.mimeType === "application/vnd.google-apps.presentation") {
+    embedIframeUrl = `https://docs.google.com/presentation/d/${df.id}/preview`;
+  } else if (df.mimeType === "application/vnd.google-apps.spreadsheet") {
+    embedIframeUrl = `https://docs.google.com/spreadsheets/d/${df.id}/preview`;
+  }
+
+  try {
+    // 1. Google Docs or Google Slides -> export as plain text
+    if (
+      df.mimeType === "application/vnd.google-apps.document" ||
+      df.mimeType === "application/vnd.google-apps.presentation"
+    ) {
+      const exportUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(df.id)}/export?mimeType=text/plain`;
+      const res = await fetch(exportUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        const text = (await res.text()).replace(/\s+/g, " ").trim();
+        if (text) {
+          return {
+            extractedText: text.slice(0, 500),
+            embedIframeUrl,
+          };
+        }
+      }
+    }
+
+    // 2. Google Sheets -> export as CSV and parse into live table
+    if (df.mimeType === "application/vnd.google-apps.spreadsheet") {
+      const exportUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(df.id)}/export?mimeType=text/csv`;
+      const res = await fetch(exportUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        const csvText = await res.text();
+        const rows = csvText
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+          .map((line) => line.split(",").map((c) => c.replace(/^"|"$/g, "").trim()));
+        return {
+          extractedText:
+            rows.length > 0
+              ? `טבלת Google Sheets חיה (${rows.length} שורות): ${rows[0].join(" | ")}`
+              : `גיליון נתונים מיובא מ-Google Sheets (${df.name})`,
+          embedIframeUrl,
+          tableData: rows.length > 0 ? rows : undefined,
+        };
+      }
+    }
+
+    // 3. Plain text / CSV / Markdown / JSON files stored in Drive
+    if (
+      df.mimeType.startsWith("text/") ||
+      df.mimeType === "application/json"
+    ) {
+      const mediaUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(df.id)}?alt=media`;
+      const res = await fetch(mediaUrl, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        const text = (await res.text()).replace(/\s+/g, " ").trim();
+        if (text) {
+          return {
+            extractedText: text.slice(0, 500),
+            embedIframeUrl,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Drive content export fallback:", err);
+  }
+
+  return {
+    extractedText: `קובץ לימודי חי מ-Google Drive (${df.name}). מוצג בתצוגה מקדימה אינטראקטיבית בכרטיסייה.`,
+    embedIframeUrl,
+  };
 }
 
 export interface ClassroomCourse {

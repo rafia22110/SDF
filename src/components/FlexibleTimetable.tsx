@@ -145,7 +145,7 @@ const DEFAULT_LESSONS: Record<string, TimetableLesson> = {
     subject: "מַדָּע וְחָלָל",
     topic: "מַצְּבֵי הַצְּבִירָה שֶׁל הַמַּיִם",
     islandId: "science",
-    gameId: "matter-lab",
+    gameId: "science-lab",
     notes: "נִיסּוּי בְּמַעְבָּדַת הַמַּיִם",
     category: "מדע וחלל",
   },
@@ -185,7 +185,7 @@ const DEFAULT_LESSONS: Record<string, TimetableLesson> = {
     subject: "חֲשִׁיבָה וְרוֹבּוֹטִיקָה",
     topic: "תִּכְנוּת מַסְלוּל רוֹבּוֹט הָאוֹר",
     islandId: "logic",
-    gameId: "robo-path",
+    gameId: "robot-path",
     notes: "אַלְגּוֹרִיתְמִיקָה בְּסִיסִית",
     category: "מדע וחלל",
   },
@@ -209,7 +209,7 @@ const DEFAULT_LESSONS: Record<string, TimetableLesson> = {
     subject: "כְּתִיבָה וְאוֹצַר מִילִּים",
     topic: "זִיכָּרוֹן מִילִּים וּכְתִיבַת סִיפּוּר",
     islandId: "words",
-    gameId: "memory-pairs",
+    gameId: "words-quiz",
     notes: "עֲבוֹדָה בִּקְבוּצוֹת",
     category: "שפה וקריאה",
   },
@@ -217,7 +217,7 @@ const DEFAULT_LESSONS: Record<string, TimetableLesson> = {
     subject: "חִידוֹת הִגָּיוֹן",
     topic: "הַשְׁלָמַת סְדָרוֹת וְדְּפוּסִים",
     islandId: "logic",
-    gameId: "logic-quiz",
+    gameId: "memory-match",
     notes: "חֲשִׁיבָה לוֹגִית",
     category: "מדע וחלל",
   },
@@ -239,8 +239,8 @@ const DEFAULT_LESSONS: Record<string, TimetableLesson> = {
   },
 };
 
-const STORAGE_LESSONS_KEY = "iyey_or_flexible_timetable_v2";
-const STORAGE_PERIODS_KEY = "iyey_or_flexible_periods_v2";
+const STORAGE_LESSONS_KEY = "iyey_or_flexible_timetable_v3";
+const STORAGE_PERIODS_KEY = "iyey_or_flexible_periods_v3";
 
 export function FlexibleTimetable({
   teacherName,

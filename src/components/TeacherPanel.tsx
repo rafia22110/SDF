@@ -25,6 +25,10 @@ import {
   GitBranch,
   Download,
   Copy,
+  Link2,
+  Gamepad2,
+  Eye,
+  Search,
 } from "lucide-react";
 import { User } from "firebase/auth";
 import {
@@ -33,16 +37,24 @@ import {
   IslandId,
   Mission,
   PartyRole,
+  Question,
   QuestType,
   Student,
 } from "../types";
-import { GAMES, GRADES } from "../data/content";
+import {
+  GAMES,
+  GRADES,
+  getCustomQuestionsMap,
+  addCustomQuestionsForGame,
+  deleteCustomQuestionForGame,
+} from "../data/content";
 import { sfx } from "../audio";
 import { AvatarSvg } from "./AvatarSvg";
 import {
   BoardCategory,
   BoardItem,
   pushItemToSmartBoard,
+  pushMultipleItemsToSmartBoard,
 } from "./SmartBoard";
 import { FlexibleTimetable } from "./FlexibleTimetable";
 import {
@@ -50,18 +62,24 @@ import {
   googleSignIn,
   logout,
   fetchDriveFiles,
+  extractDriveFileRealContent,
   fetchClassroomCourses,
   createClassroomCourseWork,
   sendGmailMessage,
   DriveFileItem,
   ClassroomCourse,
 } from "../services/workspaceAuth";
+import {
+  processAnyFileToBoardItems,
+  createBoardItemFromExternalLink,
+} from "../services/fileProcessor";
 
 interface TeacherPanelProps {
   classState: ClassState;
   onUpdateClass: (next: ClassState) => void;
   onLaunchGame: (gameId: string) => void;
   onSelectIsland?: (islandId: IslandId) => void;
+  onSwitchToBoard?: () => void;
 }
 
 interface TeacherProfile {
@@ -164,6 +182,8 @@ function extractYoutubeEmbedUrl(input: string): string | null {
   if (shortMatch) return `https://www.youtube.com/embed/${shortMatch[1]}`;
   const watchMatch = trimmed.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
   if (watchMatch) return `https://www.youtube.com/embed/${watchMatch[1]}`;
+  const shortsMatch = trimmed.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/);
+  if (shortsMatch) return `https://www.youtube.com/embed/${shortsMatch[1]}`;
   return null;
 }
 
@@ -172,6 +192,7 @@ export function TeacherPanel({
   onUpdateClass,
   onLaunchGame,
   onSelectIsland,
+  onSwitchToBoard,
 }: TeacherPanelProps) {
   const [activeSubTab, setActiveSubTab] = useState<
     "schedule" | "content" | "workspace" | "students"
@@ -203,6 +224,44 @@ export function TeacherPanel({
   const [authLoading, setAuthLoading] = useState(false);
   const [statusToast, setStatusToast] = useState<string | null>(null);
 
+  // Live Board Items Preview State (synced with SmartBoard)
+  const [liveBoardItems, setLiveBoardItems] = useState<BoardItem[]>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const raw = localStorage.getItem("iyey_or_board_items_v1");
+        if (raw) return JSON.parse(raw) as BoardItem[];
+      } catch {
+        /* ignore */
+      }
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    const syncBoard = () => {
+      try {
+        const raw = localStorage.getItem("iyey_or_board_items_v1");
+        if (raw) setLiveBoardItems(JSON.parse(raw));
+      } catch {
+        /* ignore */
+      }
+    };
+    const onCustomBoardUpdate = (ev: Event) => {
+      const detail = (ev as CustomEvent<BoardItem[]>).detail;
+      if (Array.isArray(detail)) {
+        setLiveBoardItems(detail);
+      } else {
+        syncBoard();
+      }
+    };
+    window.addEventListener("iyey_or_board_updated", onCustomBoardUpdate);
+    window.addEventListener("storage", syncBoard);
+    return () => {
+      window.removeEventListener("iyey_or_board_updated", onCustomBoardUpdate);
+      window.removeEventListener("storage", syncBoard);
+    };
+  }, []);
+
   useEffect(() => {
     const unsub = initAuth(
       (u, tok) => {
@@ -219,7 +278,7 @@ export function TeacherPanel({
 
   const showToast = (msg: string) => {
     setStatusToast(msg);
-    setTimeout(() => setStatusToast(null), 3500);
+    setTimeout(() => setStatusToast(null), 5000);
   };
 
   // Daily Agenda State
@@ -246,8 +305,14 @@ export function TeacherPanel({
     }
   }, [agenda]);
 
-  // Content Studio State (Local File, Drive, YouTube, 3-Click Presentation Generator)
+  // Content Studio State (Universal Multi-Format Upload, Drive, YouTube, 3-Click Presentation, Custom Quiz Creator)
   const [uploadedItemsCount, setUploadedItemsCount] = useState(0);
+  const [uploadCategory, setUploadCategory] = useState<BoardCategory>("מדע וחלל");
+  const [splitUploadSlides, setSplitUploadSlides] = useState(true);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+  const [isDraggingUpload, setIsDraggingUpload] = useState(false);
+  const [recentlyUploadedNames, setRecentlyUploadedNames] = useState<string[]>([]);
+
   const [ytTitle, setYtTitle] = useState("");
   const [ytUrl, setYtUrl] = useState("");
   const [ytQuestion, setYtQuestion] = useState("");
@@ -258,9 +323,30 @@ export function TeacherPanel({
   const [nbCategory, setNbCategory] = useState<BoardCategory>("מדע וחלל");
   const [showRepoSyncModal, setShowRepoSyncModal] = useState(false);
 
+  // Direct Drive / Docs / Slides / Web URL Import
+  const [directLinkTitle, setDirectLinkTitle] = useState("");
+  const [directLinkUrl, setDirectLinkUrl] = useState("");
+  const [directLinkNotes, setDirectLinkNotes] = useState("");
+  const [directLinkCategory, setDirectLinkCategory] = useState<BoardCategory>("מדע וחלל");
+
+  // Custom Playable Game Question Creator State
+  const [customQuizGameId, setCustomQuizGameId] = useState("science-lab");
+  const [customQuizPrompt, setCustomQuizPrompt] = useState("");
+  const [customQuizOpt0, setCustomQuizOpt0] = useState("");
+  const [customQuizOpt1, setCustomQuizOpt1] = useState("");
+  const [customQuizOpt2, setCustomQuizOpt2] = useState("");
+  const [customQuizOpt3, setCustomQuizOpt3] = useState("");
+  const [customQuizCorrect, setCustomQuizCorrect] = useState(0);
+  const [customQuizExplain, setCustomQuizExplain] = useState("");
+  const [customQuestionsMap, setCustomQuestionsMap] = useState<
+    Record<string, Question[]>
+  >(() => getCustomQuestionsMap());
+
   // Google Drive & Classroom & Gmail State
   const [driveFiles, setDriveFiles] = useState<DriveFileItem[]>([]);
+  const [driveSearchQuery, setDriveSearchQuery] = useState("");
   const [loadingDrive, setLoadingDrive] = useState(false);
+  const [importingDriveId, setImportingDriveId] = useState<string | null>(null);
   const [courses, setCourses] = useState<ClassroomCourse[]>([]);
   const [loadingCourses, setLoadingCourses] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -380,49 +466,100 @@ export function TeacherPanel({
     showToast("סדר היום הכיתתי פורסם לראש לוח הלמידה!");
   };
 
-  /* ---------- Content Upload (Local Files, Drive, YouTube, Repository) ---------- */
+  /* ---------- Universal Multi-Format File Upload, Drive, YouTube, Links ---------- */
 
-  const handleLocalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === "string" ? reader.result : "";
-      const snippet = text
-        ? text.slice(0, 260).replace(/\s+/g, " ").trim()
-        : `קובץ לימודי שהועלה: ${file.name}`;
-      const newItem: BoardItem = {
-        id: `file-${Date.now()}`,
-        type: "note",
-        title: `📄 ${file.name}`,
-        content: snippet || `תוכן מיובא מהקובץ ${file.name}`,
-        emoji: "📂",
-        category: "שפה וקריאה",
-        color: "emerald",
-        fontSize: "normal",
-        pinned: true,
-        x: 60,
-        y: 60,
-        author: teacherProfile.name,
-        sourceLabel: "העלאה מקובץ",
-      };
-      pushItemToSmartBoard(newItem);
-      setUploadedItemsCount((c) => c + 1);
+  const handleUniversalFilesSelected = async (
+    fileList: FileList | File[] | null,
+  ) => {
+    if (!fileList || fileList.length === 0) return;
+    setIsProcessingFiles(true);
+    try {
+      const filesArray = Array.from(fileList);
+      let allNewItems: BoardItem[] = [];
+      let lastSummary = "";
+      const names: string[] = [];
+
+      for (const file of filesArray) {
+        const res = await processAnyFileToBoardItems(file, {
+          category: uploadCategory,
+          author: teacherProfile.name,
+          splitIntoSlides: splitUploadSlides,
+        });
+        names.push(file.name);
+        lastSummary = res.summaryMessage;
+        if (res.items.length > 0) {
+          allNewItems = [...allNewItems, ...res.items];
+        }
+      }
+
+      if (allNewItems.length > 0) {
+        pushMultipleItemsToSmartBoard(allNewItems);
+      }
+
+      setUploadedItemsCount((c) => c + filesArray.length);
+      setRecentlyUploadedNames((prev) => [...names, ...prev].slice(0, 8));
       sfx.win();
-      showToast(`הקובץ "${file.name}" עובד ונוסף ללוח הלמידה!`);
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+
+      showToast(
+        filesArray.length === 1 && lastSummary
+          ? lastSummary
+          : `הועלו ועובדו ${filesArray.length} קבצים (${allNewItems.length} כרטיסיות חיות) אל הלוח החכם!`,
+      );
+    } catch (err) {
+      console.error(err);
+      showToast("אירעה שגיאה בעיבוד הקובץ. נסו שנית.");
+    } finally {
+      setIsProcessingFiles(false);
+    }
   };
 
-  const handleLoadDriveFiles = async () => {
+  const handleNotebookFileImport = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsProcessingFiles(true);
+    try {
+      const res = await processAnyFileToBoardItems(file, {
+        category: nbCategory,
+        author: teacherProfile.name,
+        splitIntoSlides: true,
+      });
+      if (res.items.length > 0) {
+        const itemsWithCustomTitle = nbTitle.trim()
+          ? res.items.map((it, idx) => ({
+              ...it,
+              title:
+                res.items.length > 1
+                  ? `שְׁקוּפִית ${idx + 1}: ${nbTitle.trim()}`
+                  : `✨ ${nbTitle.trim()} (${file.name})`,
+            }))
+          : res.items;
+        pushMultipleItemsToSmartBoard(itemsWithCustomTitle);
+        sfx.win();
+        showToast(
+          `הקובץ "${file.name}" פורק אוטומטית ל-${itemsWithCustomTitle.length} שקופיות חיות על הלוח!`,
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("לא ניתן לעבד את הקובץ למצגת.");
+    } finally {
+      setIsProcessingFiles(false);
+      e.target.value = "";
+    }
+  };
+
+  const handleLoadDriveFiles = async (queryOverride?: string) => {
     if (!accessToken) {
       await handleGoogleLogin();
       return;
     }
     setLoadingDrive(true);
     try {
-      const files = await fetchDriveFiles(accessToken);
+      const q =
+        queryOverride !== undefined ? queryOverride : driveSearchQuery;
+      const files = await fetchDriveFiles(accessToken, q);
       setDriveFiles(files);
       sfx.click();
     } catch (err) {
@@ -433,26 +570,128 @@ export function TeacherPanel({
     }
   };
 
-  const handleImportDriveFileToBoard = (df: DriveFileItem) => {
-    sfx.correct();
-    const newItem: BoardItem = {
-      id: `drive-${df.id}-${Date.now()}`,
-      type: "note",
-      title: `☁️ ${df.name}`,
-      content: `קובץ לימודי מיובא מתוך Google Drive של ${teacherProfile.name}.`,
-      emoji: "📁",
+  const handleImportDriveFileToBoard = async (df: DriveFileItem) => {
+    if (!accessToken) return;
+    setImportingDriveId(df.id);
+    try {
+      const extracted = await extractDriveFileRealContent(accessToken, df);
+      sfx.win();
+      const newItem: BoardItem = {
+        id: `drive-${df.id}-${Date.now()}`,
+        type: "note",
+        title: `☁️ ${df.name}`,
+        content: extracted.extractedText,
+        emoji: df.mimeType.includes("presentation")
+          ? "📊"
+          : df.mimeType.includes("spreadsheet")
+            ? "📈"
+            : df.mimeType.includes("document")
+              ? "📝"
+              : "📁",
+        category: uploadCategory,
+        color: "cyan",
+        fontSize: "normal",
+        pinned: true,
+        x: 70,
+        y: 70,
+        author: teacherProfile.name,
+        externalUrl:
+          df.webViewLink || `https://drive.google.com/file/d/${df.id}/view`,
+        embedIframeUrl: extracted.embedIframeUrl,
+        tableData: extracted.tableData,
+        fileName: df.name,
+        fileMimeType: df.mimeType,
+        sourceLabel: "Google Drive חי",
+      };
+      pushItemToSmartBoard(newItem);
+      showToast(`"${df.name}" יובא עם תוכן חי ותצוגה מקדימה אל הלוח החכם!`);
+    } catch (err) {
+      console.error(err);
+      showToast("שגיאה בייבוא הקובץ מ-Google Drive.");
+    } finally {
+      setImportingDriveId(null);
+    }
+  };
+
+  const handleAddDirectExternalLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directLinkUrl.trim()) return;
+    const item = createBoardItemFromExternalLink({
+      title: directLinkTitle.trim() || "קישור / מסמך חיצוני משולב",
+      url: directLinkUrl.trim(),
+      questionOrNotes: directLinkNotes.trim(),
+      category: directLinkCategory,
+      author: teacherProfile.name,
+    });
+    if (!item) {
+      showToast("נא להזין כתובת קישור תקינה.");
+      return;
+    }
+    sfx.win();
+    pushItemToSmartBoard(item);
+    setDirectLinkTitle("");
+    setDirectLinkUrl("");
+    setDirectLinkNotes("");
+    showToast("הקישור / המסמך הוטמע בכרטיסייה חיה על הלוח החכם!");
+  };
+
+  const handleAddCustomQuizQuestion = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customQuizPrompt.trim() || !customQuizOpt0.trim() || !customQuizOpt1.trim()) {
+      showToast("נא למלא את השאלה ולפחות 2 אפשרויות תשובה.");
+      return;
+    }
+    const opts = [
+      customQuizOpt0.trim(),
+      customQuizOpt1.trim(),
+      customQuizOpt2.trim(),
+      customQuizOpt3.trim(),
+    ].filter(Boolean);
+    const safeAnswerIdx = Math.min(customQuizCorrect, opts.length - 1);
+    const hintText =
+      customQuizExplain.trim() ||
+      `התשובה הנכונה היא: ${opts[safeAnswerIdx]}`;
+    const newQ: Question = {
+      prompt: customQuizPrompt.trim(),
+      options: opts,
+      answer: safeAnswerIdx,
+      display: { kind: "emoji", value: "🌟" },
+      speak: customQuizPrompt.trim(),
+      hint: hintText,
+    };
+    const updatedList = addCustomQuestionsForGame(customQuizGameId, [newQ]);
+    setCustomQuestionsMap((prev) => ({
+      ...prev,
+      [customQuizGameId]: updatedList,
+    }));
+
+    // Also push as a flashcard to the SmartBoard so students can practice it on the board too!
+    const gameMeta = GAMES.find((g) => g.id === customQuizGameId);
+    pushItemToSmartBoard({
+      id: `quiz-card-${Date.now()}`,
+      type: "flashcard",
+      title: `🎮 חִידָה חֲדָשָׁה (${gameMeta?.title || "מִשְׂחָק"}):`,
+      content: `${newQ.prompt}\nאפשרויות: ${opts.map((o, i) => `${i + 1}. ${o}`).join(" | ")}`,
+      answer: `${opts[safeAnswerIdx]} — ${hintText}`,
+      emoji: gameMeta?.emoji || "🎯",
       category: "משימות כיתה",
-      color: "cyan",
+      color: "amber",
       fontSize: "normal",
       pinned: true,
-      x: 70,
-      y: 70,
+      x: 65,
+      y: 65,
       author: teacherProfile.name,
-      externalUrl: df.webViewLink || `https://drive.google.com/file/d/${df.id}/view`,
-      sourceLabel: "Google Drive",
-    };
-    pushItemToSmartBoard(newItem);
-    showToast(`"${df.name}" יובא מ-Google Drive אל לוח הלמידה!`);
+      sourceLabel: `חידון ${gameMeta?.title || ""}`,
+    });
+
+    sfx.win();
+    setCustomQuizPrompt("");
+    setCustomQuizOpt0("");
+    setCustomQuizOpt1("");
+    setCustomQuizOpt2("");
+    setCustomQuizOpt3("");
+    setCustomQuizExplain("");
+    showToast("השאלה נוספה למשחק האי וגם נשלחה ככרטיסיית חידה ללוח החכם!");
   };
 
   const handleAddYoutubeToBoard = (e: React.FormEvent) => {
@@ -638,11 +877,24 @@ export function TeacherPanel({
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-      {/* Status Toast Banner */}
+      {/* Status Toast Banner with Instant Jump to SmartBoard */}
       {statusToast && (
-        <div className="fixed bottom-6 left-6 z-50 glass-strong border border-sky-300 px-5 py-3 rounded-2xl shadow-lg text-sm font-bold text-slate-900 flex items-center gap-2 animate-pop">
-          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+        <div className="fixed bottom-6 left-6 z-50 glass-strong border-2 border-sky-400 px-5 py-3.5 rounded-2xl shadow-xl text-sm font-bold text-slate-900 flex flex-wrap items-center gap-3 animate-pop">
+          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
           <span>{statusToast}</span>
+          {onSwitchToBoard && (
+            <button
+              type="button"
+              onClick={() => {
+                sfx.click();
+                onSwitchToBoard();
+              }}
+              className="btn-glow px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-extrabold flex items-center gap-1"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>צְפֵה בַּלּוּחַ הַחָכָם ⬅</span>
+            </button>
+          )}
         </div>
       )}
 
@@ -663,13 +915,27 @@ export function TeacherPanel({
                 {teacherProfile.name} · {classState.name} (כִּיתָּה {teacherProfile.homeroomGrade}׳)
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                קוֹד כִּיתָּה: <strong className="text-sky-700 tabular-nums">{classState.code}</strong> · {classState.students.length} תַּלְמִידִים · {totalClassStars} ⭐ כּוֹכְבֵי כִּיתָּה
+                קוֹד כִּיתָּה: <strong className="text-sky-700 tabular-nums">{classState.code}</strong> · {classState.students.length} תַּלְמִידִים · {totalClassStars} ⭐ כּוֹכְבֵי כִּיתָּה · {liveBoardItems.length} כַּרְטִיסִיּוֹת חַיּוֹת בַּלּוּחַ
               </p>
             </div>
           </div>
 
-          {/* Teacher Registration Edit + GitHub Repo Sync + Official Google Workspace Sign-In */}
+          {/* Teacher Registration Edit + Jump to SmartBoard + GitHub Repo Sync + Official Google Workspace Sign-In */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {onSwitchToBoard && (
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.click();
+                  onSwitchToBoard();
+                }}
+                className="btn-glow px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold flex items-center gap-1.5 shadow-xs"
+              >
+                <Eye className="w-4 h-4" />
+                <span>פְּתַח אֶת הַלּוּחַ הַחָכָם ({liveBoardItems.length})</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 sfx.click();
@@ -845,7 +1111,7 @@ export function TeacherPanel({
           }`}
         >
           <Upload className="w-4 h-4" />
-          <span>2. הַעֲלָאַת תְּכָנִים (קובץ, מאגר, Drive, YouTube)</span>
+          <span>2. הַעֲלָאַת כָּל סוּגֵי הַקְּבָצִים וִיצִירַת תּוֹכֶן חַי</span>
         </button>
 
         <button
@@ -1015,369 +1281,762 @@ export function TeacherPanel({
       )}
 
       {/* ====================================================================
-         TAB 2: CONTENT STUDIO (File Upload, Repository, Google Drive, YouTube)
+         TAB 2: CONTENT STUDIO (Universal Multi-Format Upload, Presentation, Drive, YouTube, Quiz Creator)
          ==================================================================== */}
       {activeSubTab === "content" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* 1. Local File Upload + 3-Click Lesson/NotebookLM Studio + Curated Repository (6 cols) */}
-          <div className="lg:col-span-6 space-y-6">
-            {/* 3-Click Lesson & Presentation Generator (NotebookLM Studio / Presentation.git Vision) */}
-            <div className="glass-strong rounded-3xl p-6 space-y-4 border border-sky-200">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-sky-600" />
-                  <span>מְחוֹלֵל מַצֶּגֶת וְשִׁיעוּר בְּ-3 לְחִיצוֹת (NotebookLM Studio)</span>
+        <div className="space-y-6">
+          {/* Live SmartBoard Items Strip so the Teacher immediately sees everything created/uploaded */}
+          <div className="glass-strong rounded-3xl p-5 border border-sky-200 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                  <span>📺 תְּצוּגָה חַיָּה שֶׁל לוּחַ הַמַּסָּע וְהָאִיסּוּף הַכִּיתָּתִי ({liveBoardItems.length} פְּרִיטִים פְּעִילִים)</span>
                 </h3>
-                <span className="px-2.5 py-0.5 rounded-lg bg-sky-100 text-sky-800 text-[11px] font-bold">
-                  Presentation Studio
-                </span>
+                <p className="text-xs text-slate-600">
+                  כָּל קוֹבֶץ שֶׁתַּעֲלוּ, מַצֶּגֶת שֶׁתִּיצְרוּ אוֹ סִרְטוֹן שֶׁתַּטְמִיעוּ מוֹפִיעַ כָּאן בִּזְמַן אֱמֶת וּמוּצָג מִיָּד לַתַּלְמִידִים עַל הַלּוּחַ הַחָכָם!
+                </p>
               </div>
-              <p className="text-xs text-slate-600">
-                הַדְבִּיקוּ סִיכּוּם מִמַּחְבֶּרֶת NotebookLM אוֹ ראשי פרקים לְמַצֶּגֶת — הַמַּעֲרֶכֶת תְּפָרֵק אוֹתָם אוֹטוֹמָטִית לְסִדְרַת כַּרְטִיסִיּוֹת לְמִידָה חַיּוֹת עַל הַלּוּחַ הַחָכָם!
-              </p>
-
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (!nbTitle.trim() || !nbSourceText.trim()) return;
-                  sfx.win();
-                  const paragraphs = nbSourceText
-                    .split(/\n+/)
-                    .map((p) => p.trim())
-                    .filter(Boolean);
-                  const slides = paragraphs.length > 0 ? paragraphs.slice(0, 4) : [nbSourceText.trim()];
-                  slides.forEach((slideText, idx) => {
-                    pushItemToSmartBoard({
-                      id: `nb-${Date.now()}-${idx}`,
-                      type: "flashcard",
-                      title:
-                        slides.length > 1
-                          ? `שְׁקוּפִית ${idx + 1}: ${nbTitle.trim()}`
-                          : `✨ ${nbTitle.trim()}`,
-                      content: slideText,
-                      answer: `נקודה מרכזית מתוך המצגת "${nbTitle.trim()}"`,
-                      emoji: "🎓",
-                      category: nbCategory,
-                      color: "cyan",
-                      fontSize: "normal",
-                      pinned: true,
-                      x: 55 + idx * 10,
-                      y: 55 + idx * 10,
-                      author: teacherProfile.name,
-                      sourceLabel: "NotebookLM / Presentation",
-                    });
-                  });
-                  setNbTitle("");
-                  setNbSourceText("");
-                  showToast(
-                    `נוצרו ${slides.length} כרטיסיות מצגת חדשות ושוגרו ללוח הלמידה!`,
-                  );
-                }}
-                className="space-y-2.5"
-              >
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    type="text"
-                    required
-                    value={nbTitle}
-                    onChange={(e) => setNbTitle(e.target.value)}
-                    placeholder="1. נוֹשֵׂא הַמַצֶּגֶת / הַשִּׁיעוּר (למשל: מחזור המים / ימי הבריאה)..."
-                    className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
-                  />
-                  <select
-                    value={nbCategory}
-                    onChange={(e) =>
-                      setNbCategory(e.target.value as BoardCategory)
-                    }
-                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
-                  >
-                    <option value="מדע וחלל">מדע וחלל</option>
-                    <option value="מתמטיקה">מתמטיקה</option>
-                    <option value="שפה וקריאה">שפה וקריאה</option>
-                    <option value="משימות כיתה">משימות כיתה</option>
-                  </select>
-                </div>
-                <textarea
-                  rows={3}
-                  required
-                  value={nbSourceText}
-                  onChange={(e) => setNbSourceText(e.target.value)}
-                  placeholder="2. הַדְבִּיקוּ כָּאן פִּסְקָאוֹת מִתּוֹךְ NotebookLM (כָּל שׁוּרָה תֵּיהָפֵךְ לִשְׁקוּפִית כַּרְטִיסִיָּה עַל הַלּוּחַ)..."
-                  className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
-                />
+              {onSwitchToBoard && (
                 <button
-                  type="submit"
-                  className="btn-glow w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                  type="button"
+                  onClick={() => {
+                    sfx.click();
+                    onSwitchToBoard();
+                  }}
+                  className="btn-glow px-4 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-sm"
                 >
-                  <Sparkles className="w-4 h-4" />
-                  <span>3. צוֹר מַצֶּגֶת חַיָּה וְשַׁגֵּר לְלוּחַ הַלְּמִידָה</span>
+                  <Eye className="w-4 h-4" />
+                  <span>עֲבוֹר לַלּוּחַ הַחָכָם לִצְפִיָּה מְלֵאָה וְהַצָּגָה ⬅</span>
                 </button>
-              </form>
-            </div>
-
-            {/* Local File Upload Card */}
-            <div className="glass-strong rounded-3xl p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <Upload className="w-5 h-5 text-emerald-600" />
-                  <span>הַעֲלָאַת תְּכָנִים מִקּוֹבֶץ מְקוֹמִי</span>
-                </h3>
-                {uploadedItemsCount > 0 && (
-                  <span className="text-xs font-bold text-emerald-700">
-                    הוּעֲלוּ {uploadedItemsCount} קְבָצִים ✓
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-slate-600">
-                הַעֲלוּ קוֹבֶץ טֶקְסְט, דַּף עֲבוֹדָה אוֹ רְשִׁימַת מוּשָׂגִים (.txt, .csv, .json, .md) — הַתּוֹכֶן יֵיהָפֵךְ אוֹטוֹמָטִית לְכַרְטִיסִיַּת לִימּוּד עַל הַלּוּחַ!
-              </p>
-
-              <label className="btn-glow cursor-pointer border-2 border-dashed border-sky-300 hover:border-sky-500 bg-sky-50/60 hover:bg-sky-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all">
-                <FileText className="w-8 h-8 text-sky-600 mb-2" />
-                <span className="text-sm font-bold text-slate-800">
-                  לִחֲצוּ לִבְחִירַת קוֹבֶץ מֵהַמַּחְשֵׁב
-                </span>
-                <span className="text-xs text-slate-500 mt-1">
-                  תּוֹמֵךְ בְּקִבְצֵי טֶקְסְט, מַעֲרְכֵי שִׁיעוּר וּדַפֵּי מוּשָׂגִים
-                </span>
-                <input
-                  type="file"
-                  accept=".txt,.csv,.json,.md"
-                  onChange={handleLocalFileUpload}
-                  className="hidden"
-                />
-              </label>
-            </div>
-
-            {/* Curated Pedagogical Repository */}
-            <div className="glass-strong rounded-3xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-violet-600" />
-                <span>מַאֲגַר עֶרְכּוֹת שִׁיעוּר מוּכָנוֹת</span>
-              </h3>
-              <p className="text-xs text-slate-600">
-                בִּחֲרוּ עֶרְכַּת תּוֹכֶן מוּכָנָה מֵהַמַּאֲגָר הַפֵּדָגוֹגִי כְּדֵי לְשַׁגֵּר אוֹתָהּ יְשִׁירוֹת לְלוּחַ הַלְּמִידָה הַכִּיתָּתִי:
-              </p>
-
-              <div className="space-y-2.5">
-                {CURATED_REPOSITORY_PACKS.map((pack) => (
-                  <div
-                    key={pack.id}
-                    className="p-3.5 rounded-2xl bg-white/85 border border-slate-200/90 flex items-center justify-between gap-3"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-2xl">{pack.emoji}</span>
-                      <div>
-                        <div className="text-sm font-bold text-slate-900 nikud">
-                          {pack.title}
-                        </div>
-                        <div className="text-xs text-slate-600 mt-0.5 nikud">
-                          {pack.content}
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        sfx.correct();
-                        pushItemToSmartBoard({
-                          id: `${pack.id}-${Date.now()}`,
-                          type: "flashcard",
-                          title: pack.title,
-                          content: pack.content,
-                          answer: pack.answer,
-                          emoji: pack.emoji,
-                          category: pack.category,
-                          color: "violet",
-                          fontSize: "normal",
-                          pinned: true,
-                          x: 60,
-                          y: 60,
-                          author: teacherProfile.name,
-                          sourceLabel: "מאגר פדגוגי",
-                        });
-                        showToast(`"${pack.title}" נוסף ללוח הלמידה!`);
-                      }}
-                      className="btn-glow px-3.5 py-2 rounded-xl bg-violet-600 text-white font-bold text-xs shrink-0 whitespace-nowrap"
-                    >
-                      + יַבֵּא לַלּוּחַ
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Google Drive Import + YouTube Educational Video Studio (6 cols) */}
-          <div className="lg:col-span-6 space-y-6">
-            {/* Google Drive Picker / Browser */}
-            <div className="glass-strong rounded-3xl p-6 space-y-4">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <FolderOpen className="w-5 h-5 text-sky-600" />
-                  <span>יְבוּא תְּכָנִים מ-Google Drive</span>
-                </h3>
-                <button
-                  onClick={handleLoadDriveFiles}
-                  disabled={loadingDrive}
-                  className="btn-glow px-4 py-2 rounded-xl bg-sky-600 text-white font-bold text-xs whitespace-nowrap"
-                >
-                  {loadingDrive
-                    ? "טוֹעֵן קְבָצִים..."
-                    : accessToken
-                      ? "רַעֲנֵן קְבָצִים מֵהַדְּרַייב"
-                      : "הִתְחַבֵּר וּטְעַן מ-Drive"}
-                </button>
-              </div>
-              <p className="text-xs text-slate-600">
-                טַעֲנוּ מִסְמָכִים, מַצָּגוֹת וְדַפֵּי עֲבוֹדָה מֵה-Google Drive שֶׁלָּכֶם וְהַצְמִידוּ אוֹתָם כְּכַרְטִיסִיּוֹת עַל לוּחַ הַלְּמִידָה.
-              </p>
-
-              {driveFiles.length > 0 ? (
-                <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
-                  {driveFiles.map((df) => (
-                    <div
-                      key={df.id}
-                      className="p-3 rounded-2xl bg-white/85 border border-slate-200 flex items-center justify-between gap-3 text-xs"
-                    >
-                      <div className="truncate">
-                        <div className="font-bold text-slate-900 truncate">
-                          {df.name}
-                        </div>
-                        <div className="text-[11px] text-slate-500 truncate">
-                          {df.mimeType}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {df.webViewLink && (
-                          <a
-                            href={df.webViewLink}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900"
-                            title="פתח ב-Drive"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                        <button
-                          onClick={() => handleImportDriveFileToBoard(df)}
-                          className="btn-glow px-3 py-1.5 rounded-xl bg-sky-600 text-white font-bold"
-                        >
-                          + הוֹסֵף לַלּוּחַ
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 rounded-2xl bg-white/65 border border-slate-200/80 text-xs text-slate-500 text-center">
-                  לִחֲצוּ עַל &quot;טְעַן מ-Drive&quot; לְהַצָּגַת הַקְּבָצִים שֶׁלָּכֶם וְיְבוּאָם לַלּוּחַ.
-                </div>
               )}
             </div>
 
-            {/* YouTube Educational Video Connector */}
-            <div className="glass-strong rounded-3xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Youtube className="w-5 h-5 text-rose-600" />
-                <span>חִיבּוּר ל-YouTube לִימּוּדִי</span>
-              </h3>
-              <p className="text-xs text-slate-600">
-                הַדְבִּיקוּ קִישּׁוּר לְסִרְטוֹן YouTube אוֹ בִּחֲרוּ סִרְטוֹן מוּכָן — הַסִּרְטוֹן יוּטְמַע כְּנַגָּן חַי בְּתוֹךְ כַּרְטִיסִיָּה עַל לוּחַ הַלְּמִידָה!
-              </p>
-
-              <form onSubmit={handleAddYoutubeToBoard} className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <input
-                    type="text"
-                    placeholder="כּוֹתֶרֶת הַסִּרְטוֹן לַתַּלְמִידִים..."
-                    value={ytTitle}
-                    onChange={(e) => setYtTitle(e.target.value)}
-                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
-                  />
-                  <input
-                    type="text"
-                    placeholder="קישור YouTube (למשל https://youtu.be/...)"
-                    value={ytUrl}
-                    onChange={(e) => setYtUrl(e.target.value)}
-                    dir="ltr"
-                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="שְׁאֵלָה מַנְחָה לַצְּפִיָּה (אופציונלי)..."
-                    value={ytQuestion}
-                    onChange={(e) => setYtQuestion(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
-                  />
-                  <select
-                    value={ytCategory}
-                    onChange={(e) =>
-                      setYtCategory(e.target.value as BoardCategory)
-                    }
-                    className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
-                  >
-                    <option value="מדע וחלל">מדע וחלל</option>
-                    <option value="מתמטיקה">מתמטיקה</option>
-                    <option value="שפה וקריאה">שפה וקריאה</option>
-                    <option value="משימות כיתה">משימות כיתה</option>
-                  </select>
-                  <button
-                    type="submit"
-                    className="btn-glow px-4 py-2 rounded-xl bg-rose-600 text-white font-bold text-xs whitespace-nowrap"
-                  >
-                    + הַטְמַע בַּלּוּחַ
-                  </button>
-                </div>
-              </form>
-
-              <div className="pt-2 border-t border-slate-200/70 space-y-2">
-                <div className="text-xs font-bold text-slate-600">
-                  אוֹ בִּחֲרוּ סִרְטוֹן לְדוּגְמָה לְשִׁיגּוּר מָהִיר לַלּוּחַ:
-                </div>
-                {CURATED_YOUTUBE_VIDEOS.map((vid) => (
-                  <div
-                    key={vid.id}
-                    className="p-3 rounded-2xl bg-white/85 border border-slate-200 flex items-center justify-between gap-2 text-xs"
-                  >
-                    <div>
-                      <div className="font-bold text-slate-900 nikud">
-                        ▶️ {vid.title}
-                      </div>
-                      <div className="text-[11px] text-slate-500 nikud">
-                        שְׁאֵלַת צְפִיָּה: {vid.question}
-                      </div>
+            <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1">
+              {liveBoardItems.slice(0, 12).map((item) => (
+                <div
+                  key={item.id}
+                  className="min-w-[230px] max-w-[250px] p-3 rounded-2xl bg-white/90 border border-slate-200/90 shadow-xs shrink-0 flex flex-col justify-between gap-2"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-1 text-[10px] font-bold text-sky-700 mb-1">
+                      <span className="truncate">{item.category}</span>
+                      {item.sourceLabel && (
+                        <span className="px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-800 truncate">
+                          {item.sourceLabel}
+                        </span>
+                      )}
                     </div>
+                    <div className="text-xs font-extrabold text-slate-900 truncate nikud">
+                      {item.emoji} {item.title}
+                    </div>
+                    <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5 nikud">
+                      {item.content}
+                    </p>
+                  </div>
+                  <div className="flex items-center justify-between pt-1.5 border-t border-slate-100 text-[10px] text-slate-400">
+                    <span>{item.attachmentType ? `📎 ${item.attachmentType}` : item.type === "flashcard" ? "❓ חידה" : "📝 פתק"}</span>
                     <button
+                      type="button"
                       onClick={() => {
-                        sfx.win();
-                        pushItemToSmartBoard({
-                          id: `${vid.id}-${Date.now()}`,
-                          type: "flashcard",
-                          title: vid.title,
-                          content: `צפו בסרטון וענו: ${vid.question}`,
-                          answer: "כל הכבוד על הצפייה והדיון הכיתתי!",
-                          emoji: "🎬",
-                          category: vid.category,
-                          color: "pink",
-                          fontSize: "normal",
-                          pinned: true,
-                          x: 70,
-                          y: 70,
-                          author: teacherProfile.name,
-                          youtubeEmbedUrl: vid.embedUrl,
-                          sourceLabel: "YouTube לימודי",
-                        });
-                        showToast(`הסרטון "${vid.title}" הוטמע בלוח הלמידה!`);
+                        sfx.click();
+                        const next = liveBoardItems.filter((x) => x.id !== item.id);
+                        localStorage.setItem("iyey_or_board_items_v1", JSON.stringify(next));
+                        window.dispatchEvent(
+                          new CustomEvent("iyey_or_board_updated", { detail: next }),
+                        );
                       }}
-                      className="btn-glow px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-bold shrink-0"
+                      className="text-rose-500 hover:underline font-bold"
                     >
-                      + שַׁגֵּר לַלּוּחַ
+                      מחק
                     </button>
                   </div>
-                ))}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* COLUMN 1: Universal Multi-Format File Upload + 3-Click Presentation Studio + Curated Repo (6 cols) */}
+            <div className="lg:col-span-6 space-y-6">
+              {/* UNIVERSAL MULTI-FORMAT FILE UPLOAD CARD */}
+              <div className="glass-strong rounded-3xl p-6 space-y-4 border-2 border-emerald-300/90">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                    <Upload className="w-5 h-5 text-emerald-600" />
+                    <span>הַעֲלָאַת קְבָצִים אוּנִיבֶרְסָלִית — כָּל הַפּוֹרְמָטִים!</span>
+                  </h3>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-900 text-[11px] font-extrabold">
+                    PDF · Word · PPTX · Excel · תמונות · שמע · וידאו
+                  </span>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  הַעֲלוּ אוֹ גִּרְרוּ לְכָאן <strong>כָּל קוֹבֶץ מֵהַמַּחְשֵׁב אוֹ הַטֶּלֶפוֹן</strong>: מַצָּגוֹת PowerPoint (<code dir="ltr">.pptx</code>), מִסְמְכֵי Word (<code dir="ltr">.docx</code>), קִבְצֵי <code dir="ltr">PDF</code>, גִּלְיוֹנוֹת Excel/CSV (<code dir="ltr">.xlsx, .csv</code>), תְּמוּנוֹת (<code dir="ltr">.png, .jpg, .svg, .webp</code>), קִבְצֵי שֵׁמַע (<code dir="ltr">.mp3, .wav, .m4a</code>), סִרְטוֹנֵי וִידֵאוֹ (<code dir="ltr">.mp4, .webm</code>), קִבְצֵי <code dir="ltr">ZIP / JSON / HTML / TXT</code> וְעוֹד!
+                </p>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-white/85 border border-slate-200 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-700">קָטֵגוֹרְיָה בַּלּוּחַ:</span>
+                    <select
+                      value={uploadCategory}
+                      onChange={(e) =>
+                        setUploadCategory(e.target.value as BoardCategory)
+                      }
+                      className="px-2.5 py-1.5 rounded-xl bg-white border border-slate-200 font-bold text-slate-900"
+                    >
+                      <option value="מדע וחלל">מדע וחלל</option>
+                      <option value="מתמטיקה">מתמטיקה</option>
+                      <option value="שפה וקריאה">שפה וקריאה</option>
+                      <option value="משימות כיתה">משימות כיתה</option>
+                    </select>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={splitUploadSlides}
+                      onChange={(e) => setSplitUploadSlides(e.target.checked)}
+                      className="rounded accent-emerald-600 w-4 h-4"
+                    />
+                    <span>פָּרֵק מַצָּגוֹת וּמִסְמָכִים אֲרוּכִּים לְכַּרְטִיסִיּוֹת שְׁקוּפִיּוֹת</span>
+                  </label>
+                </div>
+
+                <label
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDraggingUpload(true);
+                  }}
+                  onDragLeave={() => setIsDraggingUpload(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDraggingUpload(false);
+                    handleUniversalFilesSelected(e.dataTransfer.files);
+                  }}
+                  className={`btn-glow cursor-pointer border-2 border-dashed rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all ${
+                    isDraggingUpload
+                      ? "border-emerald-500 bg-emerald-100/80 scale-[1.01]"
+                      : "border-emerald-400 hover:border-emerald-600 bg-emerald-50/60 hover:bg-emerald-50"
+                  }`}
+                >
+                  <Upload className="w-9 h-9 text-emerald-600 mb-2" />
+                  <span className="text-sm font-extrabold text-slate-900">
+                    {isProcessingFiles
+                      ? "⏳ מְעַבֵּד וּמְחַלֵּץ אֶת הַקְּבָצִים לַלּוּחַ הַחָכָם..."
+                      : "לִחֲצוּ לִבְחִירַת קְבָצִים מִכָּל פּוֹרְמָט (אוֹ גִּרְרוּ קְבָצִים לְכָאן)"}
+                  </span>
+                  <span className="text-xs text-slate-600 mt-1">
+                    תּוֹמֵךְ בְּהַעֲלָאַת מִסְפַּר קְבָצִים בְּמַקְבִּיל — הַקְּבָצִים נִשְׁמָרִים וּמוּצָגִים חַיִּים עַל הַלּוּחַ!
+                  </span>
+                  <input
+                    type="file"
+                    accept="*/*"
+                    multiple
+                    onChange={(e) => {
+                      handleUniversalFilesSelected(e.target.files);
+                      e.target.value = "";
+                    }}
+                    className="hidden"
+                  />
+                </label>
+
+                {recentlyUploadedNames.length > 0 && (
+                  <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="font-bold text-emerald-950 truncate">
+                      ✅ הוּעֲלוּ לָאַחֲרוֹנָה ({uploadedItemsCount}):{" "}
+                      {recentlyUploadedNames.join(" , ")}
+                    </div>
+                    {onSwitchToBoard && (
+                      <button
+                        type="button"
+                        onClick={onSwitchToBoard}
+                        className="px-3 py-1 rounded-xl bg-emerald-600 text-white font-bold shrink-0"
+                      >
+                        צְפֵה בַּלּוּחַ ⬅
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 3-Click Lesson & Presentation Generator (NotebookLM Studio / Presentation.git Vision) */}
+              <div className="glass-strong rounded-3xl p-6 space-y-4 border border-sky-200">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-sky-600" />
+                    <span>מְחוֹלֵל מַצֶּגֶת וְשִׁיעוּר בְּ-3 לְחִיצוֹת (NotebookLM Studio)</span>
+                  </h3>
+                  <span className="px-2.5 py-0.5 rounded-lg bg-sky-100 text-sky-800 text-[11px] font-bold">
+                    Presentation Studio
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600">
+                  הַדְבִּיקוּ סִיכּוּם מִמַּחְבֶּרֶת NotebookLM אוֹ הַעֲלוּ קוֹבֶץ מַצֶּגֶת / מִסְמָךְ — הַמַּעֲרֶכֶת תְּפָרֵק אוֹתָם אוֹטוֹמָטִית לְסִדְרַת כַּרְטִיסִיּוֹת שְׁקוּפִיּוֹת חַיּוֹת עַל הַלּוּחַ הַחָכָם!
+                </p>
+
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!nbTitle.trim() || !nbSourceText.trim()) return;
+                    sfx.win();
+                    const paragraphs = nbSourceText
+                      .split(/\n+/)
+                      .map((p) => p.trim())
+                      .filter(Boolean);
+                    const slides =
+                      paragraphs.length > 0
+                        ? paragraphs.slice(0, 10)
+                        : [nbSourceText.trim()];
+                    const createdSlides: BoardItem[] = slides.map(
+                      (slideText, idx) => ({
+                        id: `nb-${Date.now()}-${idx}`,
+                        type: "flashcard",
+                        title:
+                          slides.length > 1
+                            ? `שְׁקוּפִית ${idx + 1}: ${nbTitle.trim()}`
+                            : `✨ ${nbTitle.trim()}`,
+                        content: slideText,
+                        answer: `נקודה מרכזית מתוך המצגת "${nbTitle.trim()}"`,
+                        emoji: "🎓",
+                        category: nbCategory,
+                        color: "cyan",
+                        fontSize: "normal",
+                        pinned: true,
+                        x: 55 + idx * 10,
+                        y: 55 + idx * 10,
+                        author: teacherProfile.name,
+                        sourceLabel: "NotebookLM / Presentation",
+                      }),
+                    );
+                    pushMultipleItemsToSmartBoard(createdSlides);
+                    setNbTitle("");
+                    setNbSourceText("");
+                    showToast(
+                      `נוצרו ${slides.length} שקופיות מצגת חדשות ושוגרו ללוח הלמידה!`,
+                    );
+                  }}
+                  className="space-y-2.5"
+                >
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={nbTitle}
+                      onChange={(e) => setNbTitle(e.target.value)}
+                      placeholder="1. נוֹשֵׂא הַמַצֶּגֶת / הַשִּׁיעוּר (למשל: מחזור המים / ימי הבריאה)..."
+                      className="flex-1 min-w-[180px] px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <select
+                      value={nbCategory}
+                      onChange={(e) =>
+                        setNbCategory(e.target.value as BoardCategory)
+                      }
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                    >
+                      <option value="מדע וחלל">מדע וחלל</option>
+                      <option value="מתמטיקה">מתמטיקה</option>
+                      <option value="שפה וקריאה">שפה וקריאה</option>
+                      <option value="משימות כיתה">משימות כיתה</option>
+                    </select>
+                  </div>
+                  <textarea
+                    rows={3}
+                    required
+                    value={nbSourceText}
+                    onChange={(e) => setNbSourceText(e.target.value)}
+                    placeholder="2. הַדְבִּיקוּ כָּאן פִּסְקָאוֹת מִתּוֹךְ NotebookLM (כָּל שׁוּרָה תֵּיהָפֵךְ לִשְׁקוּפִית כַּרְטִיסִיָּה עַל הַלּוּחַ)..."
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="submit"
+                      className="btn-glow flex-1 py-2.5 px-4 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                    >
+                      <Sparkles className="w-4 h-4" />
+                      <span>3. צוֹר מַצֶּגֶת חַיָּה מֵהַטֶּקְסְט</span>
+                    </button>
+
+                    <label className="btn-glow cursor-pointer py-2.5 px-4 rounded-xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-900 font-bold text-xs flex items-center justify-center gap-1.5">
+                      <Upload className="w-4 h-4 text-indigo-600" />
+                      <span>אוֹ הַעֲלֵה קוֹבֶץ מַצֶּגֶת (.pptx / .docx / .txt)</span>
+                      <input
+                        type="file"
+                        accept="*/*"
+                        onChange={handleNotebookFileImport}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </form>
+              </div>
+
+              {/* Curated Pedagogical Repository */}
+              <div className="glass-strong rounded-3xl p-6 space-y-4">
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <BookOpen className="w-5 h-5 text-violet-600" />
+                  <span>מַאֲגַר עֶרְכּוֹת שִׁיעוּר מוּכָנוֹת</span>
+                </h3>
+                <p className="text-xs text-slate-600">
+                  בִּחֲרוּ עֶרְכַּת תּוֹכֶן מוּכָנָה מֵהַמַּאֲגָר הַפֵּדָגוֹגִי כְּדֵי לְשַׁגֵּר אוֹתָהּ יְשִׁירוֹת לְלוּחַ הַלְּמִידָה הַכִּיתָּתִי:
+                </p>
+
+                <div className="space-y-2.5">
+                  {CURATED_REPOSITORY_PACKS.map((pack) => (
+                    <div
+                      key={pack.id}
+                      className="p-3.5 rounded-2xl bg-white/85 border border-slate-200/90 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="text-2xl">{pack.emoji}</span>
+                        <div>
+                          <div className="text-sm font-bold text-slate-900 nikud">
+                            {pack.title}
+                          </div>
+                          <div className="text-xs text-slate-600 mt-0.5 nikud">
+                            {pack.content}
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sfx.correct();
+                          pushItemToSmartBoard({
+                            id: `${pack.id}-${Date.now()}`,
+                            type: "flashcard",
+                            title: pack.title,
+                            content: pack.content,
+                            answer: pack.answer,
+                            emoji: pack.emoji,
+                            category: pack.category,
+                            color: "violet",
+                            fontSize: "normal",
+                            pinned: true,
+                            x: 60,
+                            y: 60,
+                            author: teacherProfile.name,
+                            sourceLabel: "מאגר פדגוגי",
+                          });
+                          showToast(`"${pack.title}" נוסף ללוח הלמידה!`);
+                        }}
+                        className="btn-glow px-3.5 py-2 rounded-xl bg-violet-600 text-white font-bold text-xs shrink-0 whitespace-nowrap"
+                      >
+                        + יַבֵּא לַלּוּחַ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* COLUMN 2: Google Drive Live Importer + Direct Link/Docs Embedder + YouTube + Playable Quiz Creator (6 cols) */}
+            <div className="lg:col-span-6 space-y-6">
+              {/* Google Drive Picker / Browser + Direct Google Docs/Slides/Drive URL */}
+              <div className="glass-strong rounded-3xl p-6 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <FolderOpen className="w-5 h-5 text-sky-600" />
+                    <span>יְבוּא תְּכָנִים חַיִּים מ-Google Drive</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => handleLoadDriveFiles()}
+                    disabled={loadingDrive}
+                    className="btn-glow px-4 py-2 rounded-xl bg-sky-600 text-white font-bold text-xs whitespace-nowrap"
+                  >
+                    {loadingDrive
+                      ? "טוֹעֵן קְבָצִים..."
+                      : accessToken
+                        ? "טְעַן / רַעֲנֵן מֵהַדְּרַייב"
+                        : "הִתְחַבֵּר וּטְעַן מ-Drive"}
+                  </button>
+                </div>
+                <p className="text-xs text-slate-600">
+                  טַעֲנוּ מִסְמָכִים (Google Docs), מַצָּגוֹת (Slides), גִּלְיוֹנוֹת (Sheets) וְקִבְצֵי PDF מֵה-Drive שֶׁלָּכֶם — הַתּוֹכֶן יְחוּלַּץ וְהַמִּסְמָךְ יוּטְמַע כְּחַלּוֹן חַי עַל הַלּוּחַ!
+                </p>
+
+                {accessToken && (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={driveSearchQuery}
+                      onChange={(e) => setDriveSearchQuery(e.target.value)}
+                      placeholder="חַפְּשׂוּ קוֹבֶץ לְפִי שֵׁם בְּ-Google Drive..."
+                      className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleLoadDriveFiles(driveSearchQuery)}
+                      className="btn-glow px-3.5 py-2 rounded-xl bg-slate-800 text-white text-xs font-bold flex items-center gap-1"
+                    >
+                      <Search className="w-3.5 h-3.5" />
+                      <span>חַפֵּשׂ</span>
+                    </button>
+                  </div>
+                )}
+
+                {driveFiles.length > 0 ? (
+                  <div className="max-h-56 overflow-y-auto space-y-2 pr-1">
+                    {driveFiles.map((df) => (
+                      <div
+                        key={df.id}
+                        className="p-3 rounded-2xl bg-white/85 border border-slate-200 flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="truncate">
+                          <div className="font-bold text-slate-900 truncate">
+                            {df.name}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">
+                            {df.mimeType}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {df.webViewLink && (
+                            <a
+                              href={df.webViewLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1.5 rounded-lg bg-slate-100 text-slate-600 hover:text-slate-900"
+                              title="פתח ב-Drive"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            disabled={importingDriveId === df.id}
+                            onClick={() => handleImportDriveFileToBoard(df)}
+                            className="btn-glow px-3 py-1.5 rounded-xl bg-sky-600 disabled:opacity-50 text-white font-bold"
+                          >
+                            {importingDriveId === df.id
+                              ? "מְיַבֵּא..."
+                              : "+ יַבֵּא תּוֹכֶן חַי לַלּוּחַ"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-2xl bg-white/65 border border-slate-200/80 text-xs text-slate-500 text-center">
+                    לִחֲצוּ עַל &quot;טְעַן מ-Drive&quot; לְהַצָּגַת הַקְּבָצִים שֶׁלָּכֶם אוֹ הַדְבִּיקוּ קִישּׁוּר יָשִׁיר לְמַטָּה:
+                  </div>
+                )}
+
+                {/* Direct Google Drive / Docs / Slides / Sheets / Web Link Embedder */}
+                <form
+                  onSubmit={handleAddDirectExternalLink}
+                  className="pt-3 border-t border-slate-200/80 space-y-2.5"
+                >
+                  <div className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5">
+                    <Link2 className="w-4 h-4 text-sky-600" />
+                    <span>הַטְמָעָה מְהִירָה מִקִּישּׁוּר יָשִׁיר (Google Docs, Slides, Sheets, Drive, PDF אוֹ אֲתַר):</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="כּוֹתֶרֶת הַפְּרִיט..."
+                      value={directLinkTitle}
+                      onChange={(e) => setDirectLinkTitle(e.target.value)}
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <input
+                      type="url"
+                      required
+                      dir="ltr"
+                      placeholder="https://docs.google.com/... או כל קישור"
+                      value={directLinkUrl}
+                      onChange={(e) => setDirectLinkUrl(e.target.value)}
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="הֶעָרוֹת אוֹ הַנְחָיָה לַתַּלְמִידִים (אופציונלי)..."
+                      value={directLinkNotes}
+                      onChange={(e) => setDirectLinkNotes(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <select
+                      value={directLinkCategory}
+                      onChange={(e) =>
+                        setDirectLinkCategory(e.target.value as BoardCategory)
+                      }
+                      className="px-2.5 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                    >
+                      <option value="מדע וחלל">מדע וחלל</option>
+                      <option value="מתמטיקה">מתמטיקה</option>
+                      <option value="שפה וקריאה">שפה וקריאה</option>
+                      <option value="משימות כיתה">משימות כיתה</option>
+                    </select>
+                    <button
+                      type="submit"
+                      className="btn-glow px-4 py-2 rounded-xl bg-sky-600 text-white font-bold text-xs whitespace-nowrap"
+                    >
+                      + הַטְמַע קִישּׁוּר
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* YouTube Educational Video Connector */}
+              <div className="glass-strong rounded-3xl p-6 space-y-4">
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Youtube className="w-5 h-5 text-rose-600" />
+                  <span>חִיבּוּר ל-YouTube לִימּוּדִי</span>
+                </h3>
+                <p className="text-xs text-slate-600">
+                  הַדְבִּיקוּ קִישּׁוּר לְסִרְטוֹן YouTube (כּוֹלֵל Shorts) אוֹ בִּחֲרוּ סִרְטוֹן מוּכָן — הַסִּרְטוֹן יוּטְמַע כְּנַגָּן חַי בְּתוֹךְ כַּרְטִיסִיָּה עַל לוּחַ הַלְּמִידָה!
+                </p>
+
+                <form onSubmit={handleAddYoutubeToBoard} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <input
+                      type="text"
+                      placeholder="כּוֹתֶרֶת הַסִּרְטוֹן לַתַּלְמִידִים..."
+                      value={ytTitle}
+                      onChange={(e) => setYtTitle(e.target.value)}
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <input
+                      type="text"
+                      placeholder="קישור YouTube (למשל https://youtu.be/...)"
+                      value={ytUrl}
+                      onChange={(e) => setYtUrl(e.target.value)}
+                      dir="ltr"
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="שְׁאֵלָה מַנְחָה לַצְּפִיָּה (אופציונלי)..."
+                      value={ytQuestion}
+                      onChange={(e) => setYtQuestion(e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <select
+                      value={ytCategory}
+                      onChange={(e) =>
+                        setYtCategory(e.target.value as BoardCategory)
+                      }
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                    >
+                      <option value="מדע וחלל">מדע וחלל</option>
+                      <option value="מתמטיקה">מתמטיקה</option>
+                      <option value="שפה וקריאה">שפה וקריאה</option>
+                      <option value="משימות כיתה">משימות כיתה</option>
+                    </select>
+                    <button
+                      type="submit"
+                      className="btn-glow px-4 py-2 rounded-xl bg-rose-600 text-white font-bold text-xs whitespace-nowrap"
+                    >
+                      + הַטְמַע בַּלּוּחַ
+                    </button>
+                  </div>
+                </form>
+
+                <div className="pt-2 border-t border-slate-200/70 space-y-2">
+                  <div className="text-xs font-bold text-slate-600">
+                    אוֹ בִּחֲרוּ סִרְטוֹן לְדוּגְמָה לְשִׁיגּוּר מָהִיר לַלּוּחַ:
+                  </div>
+                  {CURATED_YOUTUBE_VIDEOS.map((vid) => (
+                    <div
+                      key={vid.id}
+                      className="p-3 rounded-2xl bg-white/85 border border-slate-200 flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900 nikud">
+                          ▶️ {vid.title}
+                        </div>
+                        <div className="text-[11px] text-slate-500 nikud">
+                          שְׁאֵלַת צְפִיָּה: {vid.question}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sfx.win();
+                          pushItemToSmartBoard({
+                            id: `${vid.id}-${Date.now()}`,
+                            type: "flashcard",
+                            title: vid.title,
+                            content: `צפו בסרטון וענו: ${vid.question}`,
+                            answer: "כל הכבוד על הצפייה והדיון הכיתתי!",
+                            emoji: "🎬",
+                            category: vid.category,
+                            color: "pink",
+                            fontSize: "normal",
+                            pinned: true,
+                            x: 70,
+                            y: 70,
+                            author: teacherProfile.name,
+                            youtubeEmbedUrl: vid.embedUrl,
+                            sourceLabel: "YouTube לימודי",
+                          });
+                          showToast(`הסרטון "${vid.title}" הוטמע בלוח הלמידה!`);
+                        }}
+                        className="btn-glow px-3 py-1.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 font-bold shrink-0"
+                      >
+                        + שַׁגֵּר לַלּוּחַ
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* REAL PLAYABLE ISLAND QUIZ QUESTION CREATOR */}
+              <div className="glass-strong rounded-3xl p-6 space-y-4 border border-amber-300">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                    <Gamepad2 className="w-5 h-5 text-amber-600" />
+                    <span>מְחוֹלֵל שְׁאֵלוֹת חַיּוֹת לְמִשְׂחֲקֵי הָאִיִּים</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => onLaunchGame(customQuizGameId)}
+                    className="btn-glow px-3.5 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs flex items-center gap-1.5"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>שַׂחֵק כָּעֵת בַּמִּשְׂחָק עִם הַשְּׁאֵלוֹת שֶׁלִּי</span>
+                  </button>
+                </div>
+
+                <p className="text-xs text-slate-600">
+                  צְרוּ שְׁאֵלָה חֲדָשָׁה עֲבוּר אֶחָד מִמִּשְׂחֲקֵי הָאִיִּים — הַשְּׁאֵלָה מִתְווֹסֶפֶת מִיָּד לְתוֹךְ מָנוֹעַ הַמִּשְׂחָק וְגַם נִשְׁלַחַת כְּכַרְטִיסִיַּת חִידָה לַלּוּחַ הַחָכָם!
+                </p>
+
+                <form onSubmit={handleAddCustomQuizQuestion} className="space-y-2.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      בִּחֲרוּ מִשְׂחַק אִי לְהוֹסָפַת הַשְּׁאֵלָה:
+                    </label>
+                    <select
+                      value={customQuizGameId}
+                      onChange={(e) => setCustomQuizGameId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-900"
+                    >
+                      {GAMES.filter((g) =>
+                        [
+                          "letters-quiz",
+                          "syllable-builder",
+                          "numbers-quiz",
+                          "words-quiz",
+                          "rhyme-time",
+                          "science-lab",
+                          "animal-homes",
+                        ].includes(g.id),
+                      ).map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.emoji} {g.title} ({g.skills})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <input
+                    type="text"
+                    required
+                    value={customQuizPrompt}
+                    onChange={(e) => setCustomQuizPrompt(e.target.value)}
+                    placeholder="נוֹסַח הַשְּׁאֵלָה לַתַּלְמִידִים..."
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 font-bold"
+                  />
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={customQuizOpt0}
+                      onChange={(e) => setCustomQuizOpt0(e.target.value)}
+                      placeholder="אפשרות 1 (חובה)"
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <input
+                      type="text"
+                      required
+                      value={customQuizOpt1}
+                      onChange={(e) => setCustomQuizOpt1(e.target.value)}
+                      placeholder="אפשרות 2 (חובה)"
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={customQuizOpt2}
+                      onChange={(e) => setCustomQuizOpt2(e.target.value)}
+                      placeholder="אפשרות 3 (אופציונלי)"
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                    <input
+                      type="text"
+                      value={customQuizOpt3}
+                      onChange={(e) => setCustomQuizOpt3(e.target.value)}
+                      placeholder="אפשרות 4 (אופציונלי)"
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <select
+                      value={customQuizCorrect}
+                      onChange={(e) => setCustomQuizCorrect(Number(e.target.value))}
+                      className="px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-300 text-xs font-bold text-emerald-950"
+                    >
+                      <option value={0}>תשובה נכונה: אפשרות 1</option>
+                      <option value={1}>תשובה נכונה: אפשרות 2</option>
+                      <option value={2}>תשובה נכונה: אפשרות 3</option>
+                      <option value={3}>תשובה נכונה: אפשרות 4</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={customQuizExplain}
+                      onChange={(e) => setCustomQuizExplain(e.target.value)}
+                      placeholder="הסבר קצר לתשובה הנכונה..."
+                      className="px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn-glow w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs"
+                  >
+                    + הוֹסֵף שְׁאֵלָה חַיָּה לַמִּשְׂחָק וְלַלּוּחַ הַחָכָם
+                  </button>
+                </form>
+
+                {(customQuestionsMap[customQuizGameId] || []).length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 space-y-1.5">
+                    <div className="text-xs font-bold text-slate-700">
+                      שְׁאֵלוֹת מוּתְאָמוֹת שֶׁנּוֹסְפוּ לַמִּשְׂחָק הַזֶּה ({(customQuestionsMap[customQuizGameId] || []).length}):
+                    </div>
+                    {(customQuestionsMap[customQuizGameId] || []).map((q, qIdx) => (
+                      <div
+                        key={`${q.prompt}-${qIdx}`}
+                        className="p-2.5 rounded-xl bg-white/85 border border-slate-200 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <span className="font-bold text-slate-800 truncate">
+                          {q.prompt} (תשובה: {q.options[q.answer]})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const next = deleteCustomQuestionForGame(
+                              customQuizGameId,
+                              qIdx,
+                            );
+                            setCustomQuestionsMap((prev) => ({
+                              ...prev,
+                              [customQuizGameId]: next,
+                            }));
+                          }}
+                          className="text-rose-500 hover:text-rose-700 font-bold shrink-0"
+                        >
+                          מחק
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

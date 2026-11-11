@@ -443,9 +443,66 @@ export const NIKUD_MARKS: NikudMark[] = [
   { id: "shva", name: "שְׁוָא", mark: "ְ", vowelSound: "silent", desc: "עִיצּוּר קָצָר" },
 ];
 
-/* ---------- Question Generators by Island & Grade ---------- */
+/* ---------- Custom Teacher Questions Store & Question Generators ---------- */
+
+export const CUSTOM_QUESTIONS_STORAGE_KEY = "iyey_or_custom_questions_v1";
+
+export function getCustomQuestionsMap(): Record<string, Question[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(CUSTOM_QUESTIONS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+export function addCustomQuestionsForGame(
+  gameId: string,
+  newQuestions: Question[],
+): Question[] {
+  if (typeof window === "undefined") return [];
+  const map = getCustomQuestionsMap();
+  const current = Array.isArray(map[gameId]) ? map[gameId] : [];
+  const updated = [...newQuestions, ...current];
+  map[gameId] = updated;
+  try {
+    localStorage.setItem(CUSTOM_QUESTIONS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+  return updated;
+}
+
+export function deleteCustomQuestionForGame(
+  gameId: string,
+  index: number,
+): Question[] {
+  if (typeof window === "undefined") return [];
+  const map = getCustomQuestionsMap();
+  const current = Array.isArray(map[gameId]) ? map[gameId] : [];
+  const updated = current.filter((_, idx) => idx !== index);
+  map[gameId] = updated;
+  try {
+    localStorage.setItem(CUSTOM_QUESTIONS_STORAGE_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+  return updated;
+}
 
 export function getQuestionsForGame(gameId: string, grade: Grade): Question[] {
+  const customMap = getCustomQuestionsMap();
+  const customList = Array.isArray(customMap[gameId]) ? customMap[gameId] : [];
+  const baseList = getBuiltInQuestionsForGame(gameId, grade);
+  return [...customList, ...baseList];
+}
+
+function getBuiltInQuestionsForGame(gameId: string, grade: Grade): Question[] {
   const isYoung = grade === "א" || grade === "ב";
   const isMid = grade === "ג" || grade === "ד";
 

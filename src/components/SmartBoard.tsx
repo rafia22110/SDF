@@ -8,6 +8,7 @@ import {
   Trash2,
   Pin,
   ChevronLeft,
+  ChevronRight,
   Compass,
   Users,
   Copy,
@@ -24,12 +25,28 @@ import {
   BookmarkPlus,
   MapPin,
   ExternalLink,
-  Video,
+  Upload,
+  Mic,
+  Square,
+  Link2,
+  Download,
+  Edit3,
+  Play,
+  Maximize2,
+  X,
+  FileText,
 } from "lucide-react";
 import { Student } from "../types";
 import { sfx, speak } from "../audio";
 import { HEBREW_ALPHABET, NIKUD_MARKS } from "../data/content";
 import { AnalogClockSvg, AvatarSvg } from "./AvatarSvg";
+import {
+  processAnyFileToBoardItems,
+  createBoardItemFromExternalLink,
+  getFileBlobUrl,
+  downloadStoredFile,
+  saveFileToDb,
+} from "../services/fileProcessor";
 
 export type BoardCategory = "שפה וקריאה" | "מתמטיקה" | "מדע וחלל" | "משימות כיתה";
 export type BoardColor = "cyan" | "pink" | "amber" | "emerald" | "violet";
@@ -51,8 +68,16 @@ export interface BoardItem {
   y: number;
   author: string;
   youtubeEmbedUrl?: string;
+  embedIframeUrl?: string;
   externalUrl?: string;
   sourceLabel?: string;
+  attachmentType?: "image" | "pdf" | "audio" | "video" | "table" | "document";
+  fileDbId?: string;
+  fileName?: string;
+  fileMimeType?: string;
+  fileSizeLabel?: string;
+  mediaDataUrl?: string;
+  tableData?: string[][];
 }
 
 export const BOARD_STORAGE_KEY = "iyey_or_board_items_v1";
@@ -169,22 +194,243 @@ export const INITIAL_BOARD_ITEMS: BoardItem[] = [
   },
 ];
 
-export function pushItemToSmartBoard(newItem: BoardItem) {
-  if (typeof window === "undefined") return;
+export function getSmartBoardItems(): BoardItem[] {
+  if (typeof window === "undefined") return INITIAL_BOARD_ITEMS;
   try {
     const raw = localStorage.getItem(BOARD_STORAGE_KEY);
-    const current: BoardItem[] = raw ? JSON.parse(raw) : INITIAL_BOARD_ITEMS;
-    const exists = current.some((it) => it.id === newItem.id);
-    const updated = exists ? current : [newItem, ...current];
-    localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify(updated));
-    if ("BroadcastChannel" in window) {
-      const channel = new BroadcastChannel("iyey_or_smartboard_sync");
-      channel.postMessage({ type: "ITEMS_SYNC", items: updated });
-      channel.close();
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch {
     /* ignore */
   }
+  return INITIAL_BOARD_ITEMS;
+}
+
+function notifyBoardSubscribers(updated: BoardItem[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify(updated));
+  } catch {
+    // If mediaDataUrl exceeded quota, strip large inline dataUrl and keep IndexedDB ref
+    try {
+      const slim = updated.map((it) =>
+        it.fileDbId && it.mediaDataUrl && it.mediaDataUrl.length > 100000
+          ? { ...it, mediaDataUrl: undefined }
+          : it,
+      );
+      localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify(slim));
+    } catch {
+      /* ignore */
+    }
+  }
+  window.dispatchEvent(
+    new CustomEvent("iyey_or_board_updated", { detail: updated }),
+  );
+  if ("BroadcastChannel" in window) {
+    try {
+      const channel = new BroadcastChannel("iyey_or_smartboard_sync");
+      channel.postMessage({ type: "ITEMS_SYNC", items: updated });
+      channel.close();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function pushItemToSmartBoard(newItem: BoardItem) {
+  if (typeof window === "undefined") return;
+  const current = getSmartBoardItems();
+  const exists = current.some((it) => it.id === newItem.id);
+  const updated = exists ? current : [newItem, ...current];
+  notifyBoardSubscribers(updated);
+}
+
+export function pushMultipleItemsToSmartBoard(newItems: BoardItem[]) {
+  if (typeof window === "undefined" || newItems.length === 0) return;
+  const current = getSmartBoardItems();
+  const filteredNew = newItems.filter(
+    (ni) => !current.some((c) => c.id === ni.id),
+  );
+  const updated = [...filteredNew, ...current];
+  notifyBoardSubscribers(updated);
+}
+
+/* ============================================================================
+   LIVE ATTACHMENT RENDERER (Images, PDFs, Audio, Video, Excel/CSV Tables, Docs)
+   ============================================================================ */
+export function BoardAttachmentView({
+  item,
+  onZoomImage,
+}: {
+  item: BoardItem;
+  onZoomImage?: (src: string, title: string) => void;
+}) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(
+    item.mediaDataUrl || null,
+  );
+
+  useEffect(() => {
+    let active = true;
+    if (item.fileDbId) {
+      getFileBlobUrl(item.fileDbId).then((url) => {
+        if (active && url) setBlobUrl(url);
+      });
+    } else if (item.mediaDataUrl) {
+      setBlobUrl(item.mediaDataUrl);
+    }
+    return () => {
+      active = false;
+    };
+  }, [item.fileDbId, item.mediaDataUrl]);
+
+  return (
+    <div className="space-y-2.5 mt-3">
+      {/* 1. IMAGE PREVIEW */}
+      {item.attachmentType === "image" && blobUrl && (
+        <div className="rounded-xl overflow-hidden border border-slate-200 bg-white/90 relative group">
+          <img
+            src={blobUrl}
+            alt={item.title}
+            onClick={() => onZoomImage?.(blobUrl, item.title)}
+            className="w-full max-h-52 object-contain cursor-zoom-in bg-slate-50"
+          />
+          {onZoomImage && (
+            <button
+              type="button"
+              onClick={() => onZoomImage(blobUrl, item.title)}
+              className="absolute top-2 left-2 p-1.5 rounded-lg bg-slate-900/70 text-white text-[11px] font-bold flex items-center gap-1 opacity-85 hover:opacity-100"
+            >
+              <Maximize2 className="w-3 h-3" />
+              <span>הַגְדֵּל</span>
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 2. EMBEDDED PDF VIEWER */}
+      {item.attachmentType === "pdf" && blobUrl && (
+        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
+          <iframe
+            src={blobUrl}
+            title={item.title}
+            className="w-full h-56"
+          />
+        </div>
+      )}
+
+      {/* 3. LIVE AUDIO PLAYER */}
+      {item.attachmentType === "audio" && blobUrl && (
+        <div className="p-2.5 rounded-xl bg-violet-50/90 border border-violet-200">
+          <audio controls src={blobUrl} className="w-full h-9" />
+        </div>
+      )}
+
+      {/* 4. LIVE VIDEO PLAYER */}
+      {item.attachmentType === "video" && blobUrl && (
+        <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-950">
+          <video controls src={blobUrl} className="w-full max-h-56" />
+        </div>
+      )}
+
+      {/* 5. INTERACTIVE DATA TABLE (Excel .xlsx / .csv / Google Sheets) */}
+      {item.tableData && item.tableData.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white/95 overflow-x-auto max-h-48">
+          <table className="w-full text-right text-[11px] border-collapse">
+            <thead>
+              <tr className="bg-sky-50 border-b border-slate-200 text-slate-800 font-extrabold">
+                {item.tableData[0].map((cell, cIdx) => (
+                  <th key={cIdx} className="px-2 py-1.5 border-l border-slate-200/70 truncate max-w-[120px]">
+                    {cell || `עמודה ${cIdx + 1}`}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200/60">
+              {item.tableData.slice(1, 8).map((row, rIdx) => (
+                <tr key={rIdx} className="hover:bg-sky-50/40">
+                  {row.map((cell, cIdx) => (
+                    <td key={cIdx} className="px-2 py-1 border-l border-slate-200/50 text-slate-700 truncate max-w-[120px]">
+                      {cell}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 6. EMBEDDED YOUTUBE VIDEO */}
+      {item.youtubeEmbedUrl && (
+        <div className="rounded-xl overflow-hidden border border-slate-200 aspect-video bg-slate-900">
+          <iframe
+            src={item.youtubeEmbedUrl}
+            title={item.title}
+            className="w-full h-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      )}
+
+      {/* 7. EMBEDDED GOOGLE DOCS / SLIDES / SHEETS / DRIVE / EXTERNAL IFRAME */}
+      {item.embedIframeUrl && !item.youtubeEmbedUrl && (
+        <div className="rounded-xl overflow-hidden border border-slate-200 h-52 bg-white">
+          <iframe
+            src={item.embedIframeUrl}
+            title={item.title}
+            className="w-full h-full"
+            allow="autoplay"
+          />
+        </div>
+      )}
+
+      {/* 8. FILE DOWNLOAD / OPEN ORIGINAL ACTION BAR */}
+      {(item.fileDbId || item.externalUrl || blobUrl) && (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {item.fileDbId && (
+            <button
+              type="button"
+              onClick={() =>
+                downloadStoredFile(item.fileDbId!, item.fileName || item.title)
+              }
+              className="px-2.5 py-1.5 rounded-xl bg-white/90 hover:bg-white border border-slate-200 text-[11px] font-bold text-slate-800 inline-flex items-center gap-1.5 shadow-2xs"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-600" />
+              <span>
+                הוֹרֵד קוֹבֶץ מָקוֹר{" "}
+                {item.fileSizeLabel ? `(${item.fileSizeLabel})` : ""}
+              </span>
+            </button>
+          )}
+          {blobUrl && (
+            <a
+              href={blobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[11px] font-bold text-sky-800 inline-flex items-center gap-1"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span>פְּתַח בְּחַלּוֹן מָלֵא</span>
+            </a>
+          )}
+          {item.externalUrl && (
+            <a
+              href={item.externalUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-[11px] font-bold text-sky-800 inline-flex items-center gap-1"
+            >
+              <ExternalLink className="w-3 h-3" />
+              <span>פְּתַח קִישּׁוּר מָקוֹר</span>
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 interface JourneyStation {
@@ -198,27 +444,27 @@ interface JourneyStation {
 const JOURNEY_STATIONS: JourneyStation[] = [
   {
     id: 1,
-    title: "1. נְקוּדַת הַתְחָלָה: אִיסּוּף וִיצִירָה",
-    subtitle: "אִסְפוּ פְּרִיטִים מוּכָנִים אוֹ הוֹסִיפוּ מִשֶּׁלָּכֶם בְּקְלִיק",
+    title: "1. נְקוּדַת הַתְחָלָה: הַעֲלָאָה וִיצִירָה",
+    subtitle: "הַעֲלוּ כָּל קוֹבֶץ (PDF, Word, מצגת, תמונה, שמע) אוֹ צְרוּ בְּקְלִיק",
     guideTip:
-      "כָּאן מַתְחִיל הַמַּסָּע! הַקְלִידוּ מוּשָׂג אוֹ שְׁאֵלָה בְּשׁוּרַת הַיְּצִירָה הַמְּהִירָה, אוֹ לִחֲצוּ עַל פְּרִיטִים בְּ'מַאֲגַר הַפְּרִיטִים לְאִיסּוּף' כְּדֵי לֶאֱסוֹף אוֹתָם יְשִׁירוֹת לַלּוּחַ שֶׁלָּכֶם.",
-    actionText: "הַדְגֵּם אִיסּוּף פְּרִיט חָדָשׁ לַלּוּחַ",
+      "כָּאן מַתְחִיל הַמַּסָּע! בִּחֲרוּ בֵּין יְצִירַת כַּרְטִיסִיָּה, הַעֲלָאַת קְבָצִים מִכָּל פּוֹרְמָט (PDF, Word, PowerPoint, Excel, תְּמוּנוֹת, וִידֵאוֹ וְשֵׁמַע), חִיבּוּר קִישּׁוּר חַי אוֹ הַקְלָטָה קוֹלִית יְשִׁירוֹת לַלּוּחַ.",
+    actionText: "פְּתַח הַעֲלָאַת קְבָצִים מִכָּל פּוֹרְמָט",
   },
   {
     id: 2,
     title: "2. סִידּוּר מַסְלוּל הַלְּמִידָה",
-    subtitle: "מַסְלוּל מְמוּסְפָּר, עַמּוּדוֹת נוֹשֵׂא אוֹ קַנְבָּס חוֹפְשִׁי",
+    subtitle: "מַסְלוּל מְמוּסְפָּר, עַמּוּדוֹת נוֹשֵׂא, קַנְבָּס אוֹ מַצֶּגֶת מָסָךְ מָלֵא",
     guideTip:
-      "אַחֲרֵי שֶׁאָסַפְתֶּם פְּרִיטִים, בִּחֲרוּ אֵיךְ לְהַצִּיג אוֹתָם לַכִּיתָּה: כְּ'מַסְלוּל מַסָּע מְמוּסְפָּר' עִם תַּחֲנוֹת בְּרוּרוֹת, בְּ'עַמּוּדוֹת נוֹשֵׂא', אוֹ בְּ'קַנְבָּס חוֹפְשִׁי' הַמְּאַפְשֵׁר גְּרִירָה.",
-    actionText: "הַדְגֵּם תְּצוּגַת עַמּוּדוֹת נוֹשֵׂא",
+      "אַחֲרֵי שֶׁהֶעֱלֵיתֶם תְּכָנִים, בִּחֲרוּ אֵיךְ לְהַצִּיג אוֹתָם לַכִּיתָּה: כְּ'מַסְלוּל מַסָּע מְמוּסְפָּר', בְּ'עַמּוּדוֹת נוֹשֵׂא', בְּ'קַנְבָּס חוֹפְשִׁי' הַמְּאַפְשֵׁר גְּרִירָה, אוֹ בְּמַצַּב מַצֶּגֶת מָסָךְ מָלֵא.",
+    actionText: "הַפְעֵל מַצֶּגֶת מָסָךְ מָלֵא",
   },
   {
     id: 3,
-    title: "3. עִיצּוּב וְהַתְאָמַת הַלּוּחַ",
-    subtitle: "מִשְׁבְּצוֹת, שׁוּרוֹת מַחְבֶּרֶת, צְבָעִים וְצִיּוּר",
+    title: "3. עִיצּוּב, צִיּוּר וְצִילּוּם הַלּוּחַ",
+    subtitle: "מִשְׁבְּצוֹת, שׁוּרוֹת מַחְבֶּרֶת, טוּשׁ צִיּוּר וּשְׁמִירָה כִּתְמוּנָה",
     guideTip:
-      "הַתְאִימוּ אֶת מִשְׁטַח הַזְּכוּכִית שֶׁל הַלּוּחַ לַשִּׁיעוּר: מִשְׁבְּצוֹת לְחֶשְׁבּוֹן, שׁוּרוֹת לִכְתִיבָה, אוֹ הַפְעִילוּ טוּשׁ צִיּוּר לְהַדְגָּשָׁה חוֹפְשִׁית עַל הַלּוּחַ.",
-    actionText: "הַדְגֵּם מִשְׁטַח שׁוּרוֹת מַחְבֶּרֶת",
+      "הַתְאִימוּ אֶת מִשְׁטַח הַזְּכוּכִית שֶׁל הַלּוּחַ לַשִּׁיעוּר: מִשְׁבְּצוֹת לְחֶשְׁבּוֹן, שׁוּרוֹת לִכְתִיבָה, אוֹ צַיְּירוּ עִם טוּשׁ הַהַדְגָּשָׁה וְשִׁמְרוּ אֶת הַצִּיּוּר כְּכַרְטִיסִיָּה חַיָּה עַל הַלּוּחַ!",
+    actionText: "הַפְעֵל טוּשׁ צִיּוּר עַל הַלּוּחַ",
   },
   {
     id: 4,
@@ -241,25 +487,12 @@ export function SmartBoard({
     "workspace" | "alphabet" | "hundred" | "tools"
   >("workspace");
 
-  // Journey Station (1..4) — gives a clear starting point & progression
+  // Journey Station (1..4)
   const [activeStation, setActiveStation] = useState<1 | 2 | 3 | 4>(1);
   const [showGuideTip, setShowGuideTip] = useState(true);
 
   // Interactive Board Items persisted in localStorage
-  const [items, setItems] = useState<BoardItem[]>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const raw = localStorage.getItem(BOARD_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch {
-        /* ignore */
-      }
-    }
-    return INITIAL_BOARD_ITEMS;
-  });
+  const [items, setItems] = useState<BoardItem[]>(() => getSmartBoardItems());
 
   const [layoutMode, setLayoutMode] = useState<BoardLayoutMode>("journey");
   const [bgMode, setBgMode] = useState<BoardBgMode>("grid");
@@ -269,7 +502,19 @@ export function SmartBoard({
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const boardContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Effortless Quick Add & Curated Collection Tray
+  // Creation Studio Tabs on the SmartBoard:
+  // "note" (Note/Flashcard + optional file), "upload" (Any File Multi-Upload), "link" (YouTube/Drive/Web URL), "voice" (Live Mic Recorder)
+  const [createMode, setCreateMode] = useState<
+    "note" | "upload" | "link" | "voice"
+  >("note");
+  const [boardToast, setBoardToast] = useState<string | null>(null);
+
+  const showBoardNotification = (msg: string) => {
+    setBoardToast(msg);
+    setTimeout(() => setBoardToast(null), 4000);
+  };
+
+  // Mode 1: Quick Note / Flashcard + optional file attachment
   const [quickTitle, setQuickTitle] = useState("");
   const [quickContent, setQuickContent] = useState("");
   const [quickAnswer, setQuickAnswer] = useState("");
@@ -277,6 +522,37 @@ export function SmartBoard({
   const [quickCategory, setQuickCategory] = useState<BoardCategory>("שפה וקריאה");
   const [showMoreFields, setShowMoreFields] = useState(false);
   const [showLibraryTray, setShowLibraryTray] = useState(true);
+  const [attachedQuickFile, setAttachedQuickFile] = useState<File | null>(null);
+  const quickFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Mode 2: Universal Multi-Format File Upload
+  const [splitFilesIntoSlides, setSplitFilesIntoSlides] = useState(true);
+  const [isDraggingFilesOver, setIsDraggingFilesOver] = useState(false);
+  const [uploadingFilesBusy, setUploadingFilesBusy] = useState(false);
+  const multiFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Mode 3: External Link / YouTube / Google Drive / Docs / Slides
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkTitle, setLinkTitle] = useState("");
+  const [linkNotes, setLinkNotes] = useState("");
+  const [linkCategory, setLinkCategory] = useState<BoardCategory>("מדע וחלל");
+
+  // Mode 4: Live Voice Recording (MediaRecorder)
+  const [isRecordingAudio, setIsRecordingAudio] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [voiceTitle, setVoiceTitle] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<BlobPart[]>([]);
+
+  // Inline Card Editor Modal & Image Lightbox & Full-Screen Presentation Mode
+  const [editingItem, setEditingItem] = useState<BoardItem | null>(null);
+  const [zoomedImage, setZoomedImage] = useState<{
+    src: string;
+    title: string;
+  } | null>(null);
+  const [presentationIndex, setPresentationIndex] = useState<number | null>(
+    null,
+  );
 
   // Freehand Drawing Overlay
   const [drawMode, setDrawMode] = useState(false);
@@ -296,29 +572,34 @@ export function SmartBoard({
   ]);
   const [inviteName, setInviteName] = useState("");
 
-  // Sync with localStorage & BroadcastChannel
+  // Sync with custom window event & BroadcastChannel
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify(items));
-    } catch {
-      /* ignore */
-    }
-  }, [items]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !("BroadcastChannel" in window)) return;
-    const channel = new BroadcastChannel("iyey_or_smartboard_sync");
-    channel.onmessage = (ev) => {
-      if (ev.data?.type === "ITEMS_SYNC" && Array.isArray(ev.data.items)) {
-        setItems(ev.data.items);
-      } else if (ev.data?.type === "BG_SYNC" && ev.data.bgMode) {
-        setBgMode(ev.data.bgMode);
-      } else if (ev.data?.type === "LAYOUT_SYNC" && ev.data.layoutMode) {
-        setLayoutMode(ev.data.layoutMode);
+    const handleSameTabSync = (e: Event) => {
+      const customEv = e as CustomEvent<BoardItem[]>;
+      if (Array.isArray(customEv.detail)) {
+        setItems(customEv.detail);
       }
     };
-    return () => channel.close();
+    window.addEventListener("iyey_or_board_updated", handleSameTabSync);
+
+    let channel: BroadcastChannel | null = null;
+    if ("BroadcastChannel" in window) {
+      channel = new BroadcastChannel("iyey_or_smartboard_sync");
+      channel.onmessage = (ev) => {
+        if (ev.data?.type === "ITEMS_SYNC" && Array.isArray(ev.data.items)) {
+          setItems(ev.data.items);
+        } else if (ev.data?.type === "BG_SYNC" && ev.data.bgMode) {
+          setBgMode(ev.data.bgMode);
+        } else if (ev.data?.type === "LAYOUT_SYNC" && ev.data.layoutMode) {
+          setLayoutMode(ev.data.layoutMode);
+        }
+      };
+    }
+    return () => {
+      window.removeEventListener("iyey_or_board_updated", handleSameTabSync);
+      channel?.close();
+    };
   }, []);
 
   const broadcastUpdate = (
@@ -326,24 +607,28 @@ export function SmartBoard({
     nextBg?: BoardBgMode,
     nextLayout?: BoardLayoutMode,
   ) => {
-    if (typeof window === "undefined") return;
-    try {
-      localStorage.setItem(BOARD_STORAGE_KEY, JSON.stringify(nextItems));
-      if ("BroadcastChannel" in window) {
+    notifyBoardSubscribers(nextItems);
+    if (typeof window !== "undefined" && "BroadcastChannel" in window && (nextBg || nextLayout)) {
+      try {
         const channel = new BroadcastChannel("iyey_or_smartboard_sync");
-        channel.postMessage({
-          type: "ITEMS_SYNC",
-          items: nextItems,
-        });
         if (nextBg) channel.postMessage({ type: "BG_SYNC", bgMode: nextBg });
         if (nextLayout)
           channel.postMessage({ type: "LAYOUT_SYNC", layoutMode: nextLayout });
         channel.close();
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
     }
   };
+
+  // Timer for audio recording
+  useEffect(() => {
+    if (!isRecordingAudio) return;
+    const iv = setInterval(() => {
+      setRecordingSeconds((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [isRecordingAudio]);
 
   // Talking Alphabet State
   const [selectedLetter, setSelectedLetter] = useState(HEBREW_ALPHABET[0]);
@@ -375,12 +660,45 @@ export function SmartBoard({
     return () => clearInterval(iv);
   }, [timerRunning]);
 
-  /* ---------- Quick Create & 1-Click Collection Handlers ---------- */
+  /* ---------- Quick Create, Multi-Format Upload, Link & Voice Handlers ---------- */
 
-  const handleQuickAdd = (e: React.FormEvent) => {
+  const handleQuickAdd = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickTitle.trim()) return;
+    if (!quickTitle.trim() && !attachedQuickFile) return;
     sfx.pop();
+
+    // If user also attached a file to this note/flashcard, process it first
+    if (attachedQuickFile) {
+      const processed = await processAnyFileToBoardItems(attachedQuickFile, {
+        author: userName,
+        category: quickCategory,
+        splitIntoSlides: false,
+      });
+      if (processed.items.length > 0) {
+        const baseFileItem = processed.items[0];
+        const merged: BoardItem = {
+          ...baseFileItem,
+          type: quickType,
+          title: quickTitle.trim() || baseFileItem.title,
+          content: quickContent.trim() || baseFileItem.content,
+          answer:
+            quickType === "flashcard"
+              ? quickAnswer.trim() || "הַתְּשׁוּבָה הַנְּכוֹנָה!"
+              : undefined,
+        };
+        const next = [merged, ...items];
+        setItems(next);
+        broadcastUpdate(next);
+        setQuickTitle("");
+        setQuickContent("");
+        setQuickAnswer("");
+        setAttachedQuickFile(null);
+        setShowMoreFields(false);
+        showBoardNotification(`הכרטיסייה והקובץ "${attachedQuickFile.name}" נוספו ללוח!`);
+        return;
+      }
+    }
+
     const colorMap: Record<BoardCategory, BoardColor> = {
       "שפה וקריאה": "cyan",
       "מתמטיקה": "amber",
@@ -408,18 +726,145 @@ export function SmartBoard({
       category: quickCategory,
       color: colorMap[quickCategory],
       fontSize: "normal",
-      pinned: false,
+      pinned: true,
       x: 50 + ((items.length * 45) % 450),
       y: 50 + ((items.length * 35) % 240),
       author: userName,
     };
-    const next = [...items, created];
+    const next = [created, ...items];
     setItems(next);
     broadcastUpdate(next);
     setQuickTitle("");
     setQuickContent("");
     setQuickAnswer("");
     setShowMoreFields(false);
+    showBoardNotification(`"${created.title}" נוסף ללוח הלמידה!`);
+  };
+
+  const handleMultiFilesUpload = async (fileList: FileList | File[]) => {
+    const filesArray = Array.from(fileList);
+    if (filesArray.length === 0) return;
+    setUploadingFilesBusy(true);
+    try {
+      const allCreated: BoardItem[] = [];
+      let lastMessage = "";
+      for (const file of filesArray) {
+        const res = await processAnyFileToBoardItems(file, {
+          author: userName,
+          category: quickCategory,
+          splitIntoSlides: splitFilesIntoSlides,
+        });
+        allCreated.push(...res.items);
+        lastMessage = res.summaryMessage;
+      }
+      if (allCreated.length > 0) {
+        sfx.win();
+        const next = [...allCreated, ...items];
+        setItems(next);
+        broadcastUpdate(next);
+        showBoardNotification(
+          filesArray.length === 1
+            ? lastMessage
+            : `הועלו ${filesArray.length} קבצים ונוצרו ${allCreated.length} כרטיסיות חיות על הלוח!`,
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      showBoardNotification("אירעה שגיאה בעיבוד הקובץ.");
+    } finally {
+      setUploadingFilesBusy(false);
+    }
+  };
+
+  const handleAddExternalLink = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkUrl.trim()) return;
+    const created = createBoardItemFromExternalLink({
+      url: linkUrl,
+      title: linkTitle,
+      questionOrNotes: linkNotes,
+      category: linkCategory,
+      author: userName,
+    });
+    if (!created) return;
+    sfx.win();
+    const next = [created, ...items];
+    setItems(next);
+    broadcastUpdate(next);
+    setLinkUrl("");
+    setLinkTitle("");
+    setLinkNotes("");
+    showBoardNotification(`הקישור "${created.title}" הוטמע ככרטיסייה חיה על הלוח!`);
+  };
+
+  const startVoiceRecording = async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      showBoardNotification("הדפדפן אינו תומך בהקלטת מיקרופון.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordedChunksRef.current = [];
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      recorder.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) {
+          recordedChunksRef.current.push(ev.data);
+        }
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const audioBlob = new Blob(recordedChunksRef.current, {
+          type: recorder.mimeType || "audio/webm",
+        });
+        const fileDbId = `voice-${Date.now()}`;
+        const fileName = `${voiceTitle.trim() || "הקלטה-קולית"}.webm`;
+        await saveFileToDb(fileDbId, audioBlob, fileName);
+
+        const newCard: BoardItem = {
+          id: `voice-card-${Date.now()}`,
+          type: "note",
+          title: `🎙️ ${voiceTitle.trim() || `הַקְלָטָה קוֹלִית מֵאֵת ${userName}`}`,
+          content: `הקלטה קולית חיה שהוקלטה על הלוח (${recordingSeconds || 1} שניות). לחצו על נגן השמע להאזנה.`,
+          emoji: "🎙️",
+          category: quickCategory,
+          color: "violet",
+          fontSize: "normal",
+          pinned: true,
+          x: 65,
+          y: 65,
+          author: userName,
+          sourceLabel: "הקלטת מיקרופון",
+          attachmentType: "audio",
+          fileDbId,
+          fileName,
+          fileMimeType: audioBlob.type || "audio/webm",
+        };
+        sfx.win();
+        setItems((prev) => {
+          const next = [newCard, ...prev];
+          broadcastUpdate(next);
+          return next;
+        });
+        setVoiceTitle("");
+        setRecordingSeconds(0);
+        showBoardNotification("ההקלטה הקולית נשמרה ונוספה עם נגן שמע חי ללוח!");
+      };
+      recorder.start();
+      setRecordingSeconds(0);
+      setIsRecordingAudio(true);
+      sfx.pop();
+    } catch (err) {
+      console.error(err);
+      showBoardNotification("לא ניתנה הרשאה למיקרופון או שלא נמצא מיקרופון מחובר.");
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setIsRecordingAudio(false);
   };
 
   const handleCollectFromLibrary = (
@@ -441,7 +886,7 @@ export function SmartBoard({
       y: 60 + ((items.length * 40) % 220),
       author: userName,
     };
-    const next = [...items, added];
+    const next = [added, ...items];
     setItems(next);
     broadcastUpdate(next);
   };
@@ -489,38 +934,38 @@ export function SmartBoard({
     broadcastUpdate(next);
   };
 
-  /* ---------- Station Demo Action ---------- */
+  const handleSaveEditedCard = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem) return;
+    sfx.correct();
+    const next = items.map((it) =>
+      it.id === editingItem.id ? editingItem : it,
+    );
+    setItems(next);
+    broadcastUpdate(next);
+    setEditingItem(null);
+    showBoardNotification("הכרטיסייה עודכנה בהצלחה!");
+  };
+
+  /* ---------- Station Action ---------- */
   const handleStationDemo = (stationId: 1 | 2 | 3 | 4) => {
     sfx.correct();
     if (stationId === 1) {
-      const uncollected = CURATED_LIBRARY_ITEMS.find(
-        (li) => !items.some((it) => it.id === li.id),
-      );
-      if (uncollected) {
-        handleCollectFromLibrary(uncollected);
-        speak(`נאסף ללוח: ${uncollected.title}`);
-      } else {
-        setShowLibraryTray(true);
-        speak("מאגר הפריטים פתוח לאיסוף מהיר!");
-      }
+      setSubTab("workspace");
+      setCreateMode("upload");
+      multiFileInputRef.current?.click();
     } else if (stationId === 2) {
-      const nextLayout = layoutMode === "journey" ? "columns" : "journey";
-      setLayoutMode(nextLayout);
-      broadcastUpdate(items, undefined, nextLayout);
-      speak(
-        nextLayout === "columns"
-          ? "הפריטים סודרו לפי עמודות נושא"
-          : "הפריטים סודרו במסלול מסע ממוספר",
-      );
+      if (filteredItems.length > 0) {
+        setPresentationIndex(0);
+      } else {
+        const nextLayout = layoutMode === "journey" ? "columns" : "journey";
+        setLayoutMode(nextLayout);
+        broadcastUpdate(items, undefined, nextLayout);
+      }
     } else if (stationId === 3) {
-      const nextBg = bgMode === "grid" ? "lines" : "grid";
-      setBgMode(nextBg);
-      broadcastUpdate(items, nextBg);
-      speak(
-        nextBg === "lines"
-          ? "משטח הלוח הוחלף לשורות מחברת"
-          : "משטח הלוח הוחלף למשבצות חשבון",
-      );
+      setSubTab("workspace");
+      setDrawMode(true);
+      showBoardNotification("טוש ההדגשה הופעל! ציירו על הלוח ושמרו את הציור ככרטיסייה.");
     } else if (stationId === 4) {
       setSubTab("alphabet");
       speak("פתחנו את מעבדת האותיות והניקוד המדברת");
@@ -603,6 +1048,43 @@ export function SmartBoard({
     sfx.click();
   };
 
+  const saveDrawingAsCard = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL("image/png");
+    const res = await fetch(dataUrl);
+    const blob = await res.blob();
+    const fileDbId = `drawing-${Date.now()}`;
+    const fileName = `ציור-לוח-${new Date().toLocaleTimeString("he-IL")}.png`;
+    await saveFileToDb(fileDbId, blob, fileName);
+
+    const drawingCard: BoardItem = {
+      id: `draw-card-${Date.now()}`,
+      type: "note",
+      title: `🎨 תַּרְשִׁים וְצִיּוּר מֵהַלּוּחַ (${userName})`,
+      content: "ציור חופשי שנשמר מתוך משטח הציור של הלוח החכם.",
+      emoji: "🎨",
+      category: quickCategory,
+      color: "pink",
+      fontSize: "normal",
+      pinned: true,
+      x: 60,
+      y: 60,
+      author: userName,
+      sourceLabel: "ציור לוח",
+      attachmentType: "image",
+      fileDbId,
+      fileName,
+      fileMimeType: "image/png",
+      mediaDataUrl: dataUrl,
+    };
+    sfx.win();
+    const next = [drawingCard, ...items];
+    setItems(next);
+    broadcastUpdate(next);
+    showBoardNotification("הציור נשמר ככרטיסיית תמונה חיה על הלוח!");
+  };
+
   /* ---------- Frosted Glass Card Themes ---------- */
   const colorClasses: Record<BoardColor, string> = {
     cyan: "bg-gradient-to-br from-white/90 to-sky-50/85 border-sky-200/90 text-slate-800 shadow-sm",
@@ -660,7 +1142,7 @@ export function SmartBoard({
                 position: "absolute",
                 left: `${item.x}px`,
                 top: `${item.y}px`,
-                width: "295px",
+                width: "310px",
                 zIndex: draggingId === item.id ? 30 : 10,
                 cursor: drawMode ? "crosshair" : "grab",
               }
@@ -671,7 +1153,7 @@ export function SmartBoard({
         } ${item.pinned ? "ring-2 ring-sky-400/70" : ""}`}
       >
         <div>
-          {/* Top Metadata & Quiet Action Row */}
+          {/* Top Metadata & Action Row */}
           <div className="flex items-center justify-between gap-2 mb-3 text-xs text-slate-500">
             <div className="flex items-center gap-1.5 truncate">
               {typeof stepIndex === "number" && (
@@ -686,13 +1168,14 @@ export function SmartBoard({
               {item.sourceLabel && (
                 <>
                   <span aria-hidden="true">·</span>
-                  <span className="text-slate-500">{item.sourceLabel}</span>
+                  <span className="text-slate-500 truncate">{item.sourceLabel}</span>
                 </>
               )}
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
               <button
+                type="button"
                 onClick={() => speak(`${item.title}. ${item.content}`)}
                 className="p-1.5 rounded-lg hover:bg-slate-200/60 text-sky-600"
                 title="הַקְרֵא כַּרְטִיסִיָּה"
@@ -700,6 +1183,18 @@ export function SmartBoard({
                 <Volume2 className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
+                onClick={() => {
+                  sfx.click();
+                  setEditingItem({ ...item });
+                }}
+                className="p-1.5 rounded-lg hover:bg-slate-200/60 text-slate-600"
+                title="עֲרוֹךְ כַּרְטִיסִיָּה"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
                 onClick={() => cycleItemColor(item.id)}
                 className="p-1.5 rounded-lg hover:bg-slate-200/60 text-slate-500"
                 title="שַׁנֵּה גּוֹוֶן כַּרְטִיסִיָּה"
@@ -707,6 +1202,7 @@ export function SmartBoard({
                 <Palette className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
                 onClick={() => toggleItemFontSize(item.id)}
                 className="px-1.5 py-0.5 rounded-lg hover:bg-slate-200/60 text-[11px] font-bold text-slate-600"
                 title="הַגְדֵּל / הַקְטֵן גּוֹפָן"
@@ -714,6 +1210,7 @@ export function SmartBoard({
                 א+
               </button>
               <button
+                type="button"
                 onClick={() => togglePinItem(item.id)}
                 className={`p-1.5 rounded-lg hover:bg-slate-200/60 ${
                   item.pinned ? "text-amber-500" : "text-slate-400"
@@ -723,6 +1220,7 @@ export function SmartBoard({
                 <Pin className="w-3.5 h-3.5" />
               </button>
               <button
+                type="button"
                 onClick={() => deleteItem(item.id)}
                 className="p-1.5 rounded-lg hover:bg-rose-100 text-rose-500"
                 title="הָסֵר מֵהַלּוּחַ"
@@ -741,38 +1239,18 @@ export function SmartBoard({
             {item.title}
           </h4>
           <p
-            className={`text-slate-600 nikud leading-relaxed ${
+            className={`text-slate-600 nikud leading-relaxed whitespace-pre-line ${
               item.fontSize === "large" ? "text-base" : "text-sm"
             }`}
           >
             {item.content}
           </p>
 
-          {/* Optional Embedded YouTube Video */}
-          {item.youtubeEmbedUrl && (
-            <div className="mt-3 rounded-xl overflow-hidden border border-slate-200 aspect-video bg-slate-900">
-              <iframe
-                src={item.youtubeEmbedUrl}
-                title={item.title}
-                className="w-full h-full"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                allowFullScreen
-              />
-            </div>
-          )}
-
-          {/* Optional External Resource / Drive Link */}
-          {item.externalUrl && (
-            <a
-              href={item.externalUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-3 inline-flex items-center gap-1.5 text-xs font-bold text-sky-700 hover:underline"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>פְּתַח קוֹבֶץ מָקוֹר</span>
-            </a>
-          )}
+          {/* Rich Multi-Format Attachment Viewer (Images, PDF, Audio, Video, Excel/CSV Table, YouTube, Google Docs/Drive) */}
+          <BoardAttachmentView
+            item={item}
+            onZoomImage={(src, title) => setZoomedImage({ src, title })}
+          />
         </div>
 
         {/* Flashcard Interactive Answer Reveal */}
@@ -782,6 +1260,7 @@ export function SmartBoard({
               <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between nikud">
                 <span>✓ תְּשׁוּבָה: {item.answer}</span>
                 <button
+                  type="button"
                   onClick={() =>
                     setRevealedAnswers((prev) => ({
                       ...prev,
@@ -795,6 +1274,7 @@ export function SmartBoard({
               </div>
             ) : (
               <button
+                type="button"
                 onClick={() => {
                   sfx.pop();
                   setRevealedAnswers((prev) => ({ ...prev, [item.id]: true }));
@@ -812,7 +1292,42 @@ export function SmartBoard({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDraggingFilesOver(true);
+      }}
+      onDragLeave={() => setIsDraggingFilesOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDraggingFilesOver(false);
+        if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+          handleMultiFilesUpload(e.dataTransfer.files);
+        }
+      }}
+      className="max-w-7xl mx-auto px-4 py-6 space-y-6 relative"
+    >
+      {/* Floating Toast Notification */}
+      {boardToast && (
+        <div className="fixed bottom-6 left-6 z-50 glass-strong border border-sky-300 px-5 py-3 rounded-2xl shadow-lg text-xs font-extrabold text-slate-900 flex items-center gap-2 animate-pop">
+          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span>{boardToast}</span>
+        </div>
+      )}
+
+      {/* Drag & Drop Full-Board Overlay */}
+      {isDraggingFilesOver && (
+        <div className="fixed inset-4 z-50 rounded-3xl bg-sky-600/20 backdrop-blur-md border-4 border-dashed border-sky-500 flex flex-col items-center justify-center text-center p-8 pointer-events-none">
+          <Upload className="w-16 h-16 text-sky-700 mb-3 animate-bounce" />
+          <div className="text-2xl font-extrabold text-slate-900">
+            שַׁחְרְרוּ כָּאן קְבָצִים מִכָּל פּוֹרְמָט לְהַעֲלָאָה מִיָּדִית לַלּוּחַ!
+          </div>
+          <div className="text-sm font-bold text-sky-900 mt-1">
+            תּוֹמֵךְ בְּ-PDF, Word, PowerPoint, Excel, תְּמוּנוֹת, סִרְטוֹנִים, קִבְצֵי שֵׁמַע, CSV, JSON, HTML וְ-ZIP
+          </div>
+        </div>
+      )}
+
       {/* ====================================================================
          1. VISUAL JOURNEY PATH (נקודת התחלה ברורה ותחושת מסע)
          ==================================================================== */}
@@ -830,6 +1345,21 @@ export function SmartBoard({
 
           <div className="flex flex-wrap items-center gap-2.5">
             <button
+              type="button"
+              onClick={() => {
+                if (filteredItems.length > 0) {
+                  sfx.win();
+                  setPresentationIndex(0);
+                }
+              }}
+              className="btn-glow px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-xs"
+            >
+              <Play className="w-3.5 h-3.5" />
+              <span>הַצֵּג מַצֶּגֶת מָסָךְ מָלֵא ({filteredItems.length})</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 sfx.click();
                 setShowGuideTip((s) => !s);
@@ -845,6 +1375,7 @@ export function SmartBoard({
             </button>
 
             <button
+              type="button"
               onClick={() => {
                 sfx.click();
                 setShowInviteModal(true);
@@ -864,6 +1395,7 @@ export function SmartBoard({
             return (
               <button
                 key={st.id}
+                type="button"
                 onClick={() => {
                   sfx.click();
                   setActiveStation(st.id);
@@ -902,7 +1434,7 @@ export function SmartBoard({
           })}
         </div>
 
-        {/* Gentle Contextual Guide Strip for the Active Station */}
+        {/* Contextual Guide Strip for the Active Station */}
         {showGuideTip && (
           <div className="mt-4 p-4 rounded-2xl bg-sky-50/90 border border-sky-200/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-pop">
             <div className="flex items-start gap-3">
@@ -918,6 +1450,7 @@ export function SmartBoard({
 
             <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
               <button
+                type="button"
                 onClick={() =>
                   speak(`${currentStationObj.title}. ${currentStationObj.guideTip}`)
                 }
@@ -927,6 +1460,7 @@ export function SmartBoard({
                 <Volume2 className="w-4 h-4" />
               </button>
               <button
+                type="button"
                 onClick={() => handleStationDemo(currentStationObj.id)}
                 className="btn-glow px-4 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm"
               >
@@ -935,6 +1469,7 @@ export function SmartBoard({
               </button>
               {activeStation < 4 && (
                 <button
+                  type="button"
                   onClick={() => {
                     sfx.click();
                     setActiveStation((s) =>
@@ -953,101 +1488,364 @@ export function SmartBoard({
       </section>
 
       {/* ====================================================================
-         2. EFFORTLESS ITEM CREATION & 1-CLICK COLLECTION (איסוף ויצירה בקלות)
+         2. REAL MULTI-FORMAT UPLOAD & CREATION STUDIO ON THE SMARTBOARD
          ==================================================================== */}
       {subTab === "workspace" && (
         <section className="glass-strong rounded-3xl p-5 space-y-4">
-          {/* Instant 1-Line Quick Add Bar */}
-          <form onSubmit={handleQuickAdd} className="space-y-3">
-            <div className="flex flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
-                <button
-                  type="button"
-                  onClick={() => setQuickType("note")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
-                    quickType === "note"
-                      ? "bg-white text-slate-900 shadow-xs"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  📝 פִּתְקִית לִימּוּד
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setQuickType("flashcard");
-                    setShowMoreFields(true);
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
-                    quickType === "flashcard"
-                      ? "bg-white text-slate-900 shadow-xs"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                >
-                  ❓ כַּרְטִיסִיַּת חִידָה
-                </button>
-              </div>
-
-              <select
-                value={quickCategory}
-                onChange={(e) =>
-                  setQuickCategory(e.target.value as BoardCategory)
-                }
-                aria-label="נושא הפריט"
-                className="px-3 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs font-bold text-slate-700"
+          {/* Creation Mode Switcher: Note/Flashcard | Upload Any File | Live Link | Voice Recording */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.click();
+                  setCreateMode("note");
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all ${
+                  createMode === "note"
+                    ? "bg-sky-600 text-white shadow-xs"
+                    : "bg-white/80 text-slate-700 hover:bg-white border border-slate-200/80"
+                }`}
               >
-                <option value="שפה וקריאה">שָׂפָה וּקְרִיאָה</option>
-                <option value="מתמטיקה">מָתֵמָטִיקָה</option>
-                <option value="מדע וחלל">מַדָּע וְחָלָל</option>
-                <option value="משימות כיתה">מְשִׂימוֹת כִּיתָּה</option>
-              </select>
-
-              <input
-                type="text"
-                placeholder="הַקְלִידוּ מוּשָׂג, מִילָּה אוֹ שְׁאֵלָה כְּדֵי לְהוֹסִיף מִיָּד לַלּוּחַ..."
-                value={quickTitle}
-                onChange={(e) => setQuickTitle(e.target.value)}
-                className="flex-1 min-w-[220px] px-4 py-2.5 rounded-xl bg-white/95 border border-slate-200/90 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-sky-400"
-              />
+                <Plus className="w-3.5 h-3.5" />
+                <span>📝 פִּתְקִית / כַּרְטִיסִיַּת חִידָה</span>
+              </button>
 
               <button
                 type="button"
-                onClick={() => setShowMoreFields((m) => !m)}
-                className="px-3 py-2.5 rounded-xl bg-white/80 border border-slate-200 text-xs font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap"
+                onClick={() => {
+                  sfx.click();
+                  setCreateMode("upload");
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all ${
+                  createMode === "upload"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "bg-white/80 text-slate-700 hover:bg-white border border-slate-200/80"
+                }`}
               >
-                {showMoreFields ? "פָּחוֹת פְּרָטִים" : "+ פֵּירוּט / תְּשׁוּבָה"}
+                <Upload className="w-3.5 h-3.5" />
+                <span>📂 הַעֲלָאַת קְבָצִים מִכָּל פּוֹרְמָט (PDF, Word, מצגת, תמונה, שמע, וידאו)</span>
               </button>
 
               <button
-                type="submit"
-                className="btn-glow px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+                type="button"
+                onClick={() => {
+                  sfx.click();
+                  setCreateMode("link");
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all ${
+                  createMode === "link"
+                    ? "bg-rose-600 text-white shadow-xs"
+                    : "bg-white/80 text-slate-700 hover:bg-white border border-slate-200/80"
+                }`}
               >
-                <Plus className="w-4 h-4" />
-                <span>הוֹסֵף לַלּוּחַ שֶׁלִּי</span>
+                <Link2 className="w-3.5 h-3.5" />
+                <span>🔗 חִיבּוּר קִישּׁוּר חַי (YouTube / Drive / Docs / אתר)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  sfx.click();
+                  setCreateMode("voice");
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all ${
+                  createMode === "voice"
+                    ? "bg-violet-600 text-white shadow-xs"
+                    : "bg-white/80 text-slate-700 hover:bg-white border border-slate-200/80"
+                }`}
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span>🎙️ הַקְלָטָה קוֹלִית חַיָּה</span>
               </button>
             </div>
 
-            {showMoreFields && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 animate-pop">
+            <span className="text-[11px] font-bold text-slate-500">
+              💡 נִיתָּן גַּם לִגְרוֹר קְבָצִים מֵהַמַּחְשֵׁב יְשִׁירוֹת לְכָל מָקוֹם עַל הַלּוּחַ!
+            </span>
+          </div>
+
+          {/* MODE 1: Quick Note / Flashcard + Optional Any-Format File Attachment */}
+          {createMode === "note" && (
+            <form onSubmit={handleQuickAdd} className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex items-center gap-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => setQuickType("note")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+                      quickType === "note"
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    📝 פִּתְקִית לִימּוּד
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickType("flashcard");
+                      setShowMoreFields(true);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+                      quickType === "flashcard"
+                        ? "bg-white text-slate-900 shadow-xs"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    ❓ כַּרְטִיסִיַּת חִידָה
+                  </button>
+                </div>
+
+                <select
+                  value={quickCategory}
+                  onChange={(e) =>
+                    setQuickCategory(e.target.value as BoardCategory)
+                  }
+                  aria-label="נושא הפריט"
+                  className="px-3 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs font-bold text-slate-700"
+                >
+                  <option value="שפה וקריאה">שָׂפָה וּקְרִיאָה</option>
+                  <option value="מתמטיקה">מָתֵמָטִיקָה</option>
+                  <option value="מדע וחלל">מַדָּע וְחָלָל</option>
+                  <option value="משימות כיתה">מְשִׂימוֹת כִּיתָּה</option>
+                </select>
+
                 <input
                   type="text"
-                  placeholder="הֶסְבֵּר מַרְחִיב אוֹ דּוּגְמָה לַכַּרְטִיסִיָּה..."
-                  value={quickContent}
-                  onChange={(e) => setQuickContent(e.target.value)}
-                  className="px-3.5 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs text-slate-800"
+                  placeholder="הַקְלִידוּ מוּשָׂג, מִילָּה אוֹ שְׁאֵלָה כְּדֵי לְהוֹסִיף מִיָּד לַלּוּחַ..."
+                  value={quickTitle}
+                  onChange={(e) => setQuickTitle(e.target.value)}
+                  className="flex-1 min-w-[200px] px-4 py-2.5 rounded-xl bg-white/95 border border-slate-200/90 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-sky-400"
                 />
-                {quickType === "flashcard" && (
+
+                <input
+                  ref={quickFileInputRef}
+                  type="file"
+                  accept="*/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) setAttachedQuickFile(f);
+                  }}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => quickFileInputRef.current?.click()}
+                  className={`px-3 py-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 whitespace-nowrap ${
+                    attachedQuickFile
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-800"
+                      : "bg-white/80 border-slate-200 text-slate-700 hover:bg-white"
+                  }`}
+                >
+                  <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>
+                    {attachedQuickFile
+                      ? `מְצוֹרָף: ${attachedQuickFile.name.slice(0, 18)}`
+                      : "+ צָרֵף קוֹבֶץ"}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMoreFields((m) => !m)}
+                  className="px-3 py-2.5 rounded-xl bg-white/80 border border-slate-200 text-xs font-semibold text-slate-600 hover:text-slate-900 whitespace-nowrap"
+                >
+                  {showMoreFields ? "פָּחוֹת פְּרָטִים" : "+ פֵּירוּט / תְּשׁוּבָה"}
+                </button>
+
+                <button
+                  type="submit"
+                  className="btn-glow px-5 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>הוֹסֵף לַלּוּחַ שֶׁלִּי</span>
+                </button>
+              </div>
+
+              {showMoreFields && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 animate-pop">
                   <input
                     type="text"
-                    placeholder="הַתְּשׁוּבָה הַמּוּסְתֶּרֶת שֶׁתִּתְגַּלֶּה בִּלְחִיצָה..."
-                    value={quickAnswer}
-                    onChange={(e) => setQuickAnswer(e.target.value)}
-                    className="px-3.5 py-2 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-slate-800"
+                    placeholder="הֶסְבֵּר מַרְחִיב אוֹ דּוּגְמָה לַכַּרְטִיסִיָּה..."
+                    value={quickContent}
+                    onChange={(e) => setQuickContent(e.target.value)}
+                    className="px-3.5 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs text-slate-800"
                   />
+                  {quickType === "flashcard" && (
+                    <input
+                      type="text"
+                      placeholder="הַתְּשׁוּבָה הַמּוּסְתֶּרֶת שֶׁתִּתְגַּלֶּה בִּלְחִיצָה..."
+                      value={quickAnswer}
+                      onChange={(e) => setQuickAnswer(e.target.value)}
+                      className="px-3.5 py-2 rounded-xl bg-amber-50/90 border border-amber-200 text-xs text-slate-800"
+                    />
+                  )}
+                </div>
+              )}
+            </form>
+          )}
+
+          {/* MODE 2: Universal Multi-Format File Upload Dropzone */}
+          {createMode === "upload" && (
+            <div className="space-y-3 animate-pop">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-extrabold text-slate-800">
+                    שַׁיֵּיךְ קְבָצִים לְנוֹשֵׂא:
+                  </span>
+                  <select
+                    value={quickCategory}
+                    onChange={(e) =>
+                      setQuickCategory(e.target.value as BoardCategory)
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                  >
+                    <option value="שפה וקריאה">שָׂפָה וּקְרִיאָה</option>
+                    <option value="מתמטיקה">מָתֵמָטִיקָה</option>
+                    <option value="מדע וחלל">מַדָּע וְחָלָל</option>
+                    <option value="משימות כיתה">מְשִׂימוֹת כִּיתָּה</option>
+                  </select>
+                </div>
+
+                <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={splitFilesIntoSlides}
+                    onChange={(e) => setSplitFilesIntoSlides(e.target.checked)}
+                    className="rounded border-slate-300"
+                  />
+                  <span>
+                    פָּרֵק אוֹטוֹמָטִית מַצָּגוֹת PowerPoint (.pptx) וּמִסְמְכֵי Word (.docx) לְסִדְרַת כַּרְטִיסִיּוֹת שְׁקוּפִיּוֹת
+                  </span>
+                </label>
+              </div>
+
+              <input
+                ref={multiFileInputRef}
+                type="file"
+                accept="*/*"
+                multiple
+                onChange={(e) => {
+                  if (e.target.files && e.target.files.length > 0) {
+                    handleMultiFilesUpload(e.target.files);
+                    e.target.value = "";
+                  }
+                }}
+                className="hidden"
+              />
+
+              <div
+                onClick={() => multiFileInputRef.current?.click()}
+                className="cursor-pointer border-2 border-dashed border-emerald-400 hover:border-emerald-600 bg-emerald-50/60 hover:bg-emerald-50 rounded-2xl p-6 flex flex-col items-center justify-center text-center transition-all"
+              >
+                <Upload className="w-9 h-9 text-emerald-600 mb-2" />
+                <div className="text-sm font-extrabold text-slate-900">
+                  {uploadingFilesBusy
+                    ? "מְעַבֵּד וּמַעֲלֶה קְבָצִים לַלּוּחַ..."
+                    : "לִחֲצוּ כָּאן לִבְחִירַת קְבָצִים מֵהַמַּחְשֵׁב אוֹ גִּרְרוּ קְבָצִים לְכָאן"}
+                </div>
+                <div className="text-xs text-slate-600 mt-1 max-w-2xl">
+                  תּוֹמֵךְ בְּכָל הַפּוֹרְמָטִים: <strong>PDF</strong> (מציג מסמך חי),{" "}
+                  <strong>PowerPoint (.pptx)</strong> (פירוק לשקופיות),{" "}
+                  <strong>Word (.docx)</strong>, <strong>Excel / CSV (.xlsx, .csv)</strong>{" "}
+                  (טבלה חיה), <strong>תְּמוּנוֹת</strong> (PNG, JPG, SVG, GIF, WebP),{" "}
+                  <strong>שֵׁמַע</strong> (MP3, WAV, M4A), <strong>וִידֵאוֹ</strong> (MP4, WebM),{" "}
+                  <strong>JSON / HTML / TXT / ZIP</strong> וְכָל קוֹבֶץ אַחֵר!
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODE 3: Connect Any External Link (YouTube, Google Drive/Docs/Slides, Websites) */}
+          {createMode === "link" && (
+            <form onSubmit={handleAddExternalLink} className="space-y-3 animate-pop">
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5">
+                <input
+                  type="text"
+                  required
+                  dir="ltr"
+                  placeholder="הדביקו קישור: YouTube / Google Docs / Google Slides / Google Drive / PDF / תמונה / אתר..."
+                  value={linkUrl}
+                  onChange={(e) => setLinkUrl(e.target.value)}
+                  className="md:col-span-5 px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                />
+                <input
+                  type="text"
+                  placeholder="כּוֹתֶרֶת לַכַּרְטִיסִיָּה (למשל: סרטון מערכת השמש)..."
+                  value={linkTitle}
+                  onChange={(e) => setLinkTitle(e.target.value)}
+                  className="md:col-span-3 px-3.5 py-2.5 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                />
+                <select
+                  value={linkCategory}
+                  onChange={(e) =>
+                    setLinkCategory(e.target.value as BoardCategory)
+                  }
+                  className="md:col-span-2 px-3 py-2.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                >
+                  <option value="מדע וחלל">מדע וחלל</option>
+                  <option value="מתמטיקה">מתמטיקה</option>
+                  <option value="שפה וקריאה">שפה וקריאה</option>
+                  <option value="משימות כיתה">משימות כיתה</option>
+                </select>
+                <button
+                  type="submit"
+                  className="md:col-span-2 btn-glow py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  <span>הַטְמַע בַּלּוּחַ</span>
+                </button>
+              </div>
+              <input
+                type="text"
+                placeholder="שְׁאֵלָה מַנְחָה אוֹ הֶעָרָה לַתַּלְמִידִים (אופציונלי — יהפוך את הקישור לכרטיסיית חידה)..."
+                value={linkNotes}
+                onChange={(e) => setLinkNotes(e.target.value)}
+                className="w-full px-3.5 py-2 rounded-xl bg-white/90 border border-slate-200 text-xs text-slate-800"
+              />
+            </form>
+          )}
+
+          {/* MODE 4: Live Microphone Voice Recorder */}
+          {createMode === "voice" && (
+            <div className="p-4 rounded-2xl bg-violet-50/80 border border-violet-200 flex flex-wrap items-center justify-between gap-4 animate-pop">
+              <div className="flex-1 min-w-[220px] space-y-1">
+                <div className="text-xs font-extrabold text-violet-950">
+                  🎙️ הַקְלָטַת הוֹדָעָה קוֹלִית אוֹ הַסְבֵּר שֶׁל הַמּוֹרֶה / הַתַּלְמִיד יְשִׁירוֹת לַלּוּחַ:
+                </div>
+                <input
+                  type="text"
+                  placeholder="כּוֹתֶרֶת לַהַקְלָטָה (למשל: הנחיות למשימת הבוקר)..."
+                  value={voiceTitle}
+                  onChange={(e) => setVoiceTitle(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-xl bg-white border border-violet-200 text-xs text-slate-900"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                {isRecordingAudio ? (
+                  <button
+                    type="button"
+                    onClick={stopVoiceRecording}
+                    className="btn-glow px-5 py-3 rounded-2xl bg-rose-600 text-white font-extrabold text-xs flex items-center gap-2 animate-pulse"
+                  >
+                    <Square className="w-4 h-4 fill-current" />
+                    <span>עֲצוֹר וּשְׁמוֹר הַקְלָטָה ({recordingSeconds} שניות)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={startVoiceRecording}
+                    className="btn-glow px-5 py-3 rounded-2xl bg-violet-600 hover:bg-violet-500 text-white font-extrabold text-xs flex items-center gap-2"
+                  >
+                    <Mic className="w-4 h-4" />
+                    <span>הַתְחֵל הַקְלָטָה בַּמִּיקְרוֹפוֹן</span>
+                  </button>
                 )}
               </div>
-            )}
-          </form>
+            </div>
+          )}
 
           {/* Curated Ready-to-Collect Treasure Strip */}
           <div className="pt-3 border-t border-slate-200/70">
@@ -1059,6 +1857,7 @@ export function SmartBoard({
                 </span>
               </div>
               <button
+                type="button"
                 onClick={() => setShowLibraryTray((t) => !t)}
                 className="text-xs font-semibold text-sky-600 hover:underline"
               >
@@ -1073,6 +1872,7 @@ export function SmartBoard({
                   return (
                     <button
                       key={lib.id}
+                      type="button"
                       onClick={() => handleCollectFromLibrary(lib)}
                       className={`btn-glow shrink-0 px-3.5 py-2.5 rounded-2xl border text-right transition-all flex items-center gap-2.5 max-w-[260px] ${
                         collected
@@ -1114,6 +1914,7 @@ export function SmartBoard({
         {/* Sub-Tabs: Main Board vs Interactive Manipulatives */}
         <div className="flex flex-wrap items-center gap-1.5">
           <button
+            type="button"
             onClick={() => {
               sfx.click();
               setSubTab("workspace");
@@ -1128,6 +1929,7 @@ export function SmartBoard({
             <span>הַלּוּחַ שֶׁלִּי ({items.length})</span>
           </button>
           <button
+            type="button"
             onClick={() => {
               sfx.click();
               setSubTab("alphabet");
@@ -1143,6 +1945,7 @@ export function SmartBoard({
             <span>אוֹתִיּוֹת וְנִיקּוּד מְדַבֵּר</span>
           </button>
           <button
+            type="button"
             onClick={() => {
               sfx.click();
               setSubTab("hundred");
@@ -1158,6 +1961,7 @@ export function SmartBoard({
             <span>לוּחַ הַמֵּאָה וְשָׁעוֹן</span>
           </button>
           <button
+            type="button"
             onClick={() => {
               sfx.click();
               setSubTab("tools");
@@ -1183,11 +1987,12 @@ export function SmartBoard({
                   { id: "journey", label: "מַסְלוּל מַסָּע" },
                   { id: "columns", label: "עַמּוּדוֹת" },
                   { id: "grid", label: "רֶשֶׁת" },
-                  { id: "canvas", label: "גְּרִירָה חוֹפְשִׁית" },
+                  { id: "canvas", label: "גְּרִירָה חוֹפְשִׁי" },
                 ] as const
               ).map((ly) => (
                 <button
                   key={ly.id}
+                  type="button"
                   onClick={() => {
                     sfx.click();
                     setLayoutMode(ly.id);
@@ -1215,6 +2020,7 @@ export function SmartBoard({
               ).map((b) => (
                 <button
                   key={b.id}
+                  type="button"
                   onClick={() => {
                     sfx.click();
                     setBgMode(b.id);
@@ -1233,6 +2039,7 @@ export function SmartBoard({
             </div>
 
             <button
+              type="button"
               onClick={() => {
                 sfx.click();
                 setDrawMode((d) => !d);
@@ -1266,6 +2073,7 @@ export function SmartBoard({
                   (hex) => (
                     <button
                       key={hex}
+                      type="button"
                       onClick={() => setBrushColor(hex)}
                       style={{ backgroundColor: hex }}
                       className={`w-6 h-6 rounded-full border-2 ${
@@ -1278,13 +2086,24 @@ export function SmartBoard({
                   ),
                 )}
               </div>
-              <button
-                onClick={clearDrawing}
-                className="btn-glow px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1"
-              >
-                <Eraser className="w-3.5 h-3.5" />
-                <span>נַקֵּה סִימּוּנִים</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={saveDrawingAsCard}
+                  className="btn-glow px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center gap-1"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>שְׁמוֹר צִיּוּר כְּכַרְטִיסִיָּה עַל הַלּוּחַ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={clearDrawing}
+                  className="btn-glow px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-700 flex items-center gap-1"
+                >
+                  <Eraser className="w-3.5 h-3.5" />
+                  <span>נַקֵּה סִימּוּנִים</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -1879,6 +2698,323 @@ export function SmartBoard({
               סְגִירָה
             </button>
           </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+         EDIT BOARD ITEM MODAL (עריכת כרטיסייה על הלוח)
+         ==================================================================== */}
+      {editingItem && (
+        <div className="fixed inset-0 z-50 bg-slate-900/45 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="glass-strong rounded-3xl p-6 max-w-lg w-full border border-white animate-pop space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-sky-600" />
+                <span>עֲרִיכַת פְּרִיט עַל הַלּוּחַ</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingItem(null)}
+                className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSaveEditedCard}
+              className="space-y-3"
+            >
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  כּוֹתֶרֶת:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingItem.title}
+                  onChange={(e) =>
+                    setEditingItem({ ...editingItem, title: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900 font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    קָטֵגוֹרְיָה:
+                  </label>
+                  <select
+                    value={editingItem.category}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        category: e.target.value as BoardCategory,
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                  >
+                    <option value="שפה וקריאה">שפה וקריאה</option>
+                    <option value="מתמטיקה">מתמטיקה</option>
+                    <option value="מדע וחלל">מדע וחלל</option>
+                    <option value="משימות כיתה">משימות כיתה</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    סוּג כַּרְטִיסִיָּה:
+                  </label>
+                  <select
+                    value={editingItem.type}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        type: e.target.value as "note" | "flashcard",
+                      })
+                    }
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-800"
+                  >
+                    <option value="note">פֶּתֶק מֵידָע / קוֹבֶץ</option>
+                    <option value="flashcard">כַּרְטִיסִיַּת חִידָה (עִם תְּשׁוּבָה)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  תּוֹכֶן הַפְּרִיט:
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  value={editingItem.content}
+                  onChange={(e) =>
+                    setEditingItem({ ...editingItem, content: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                />
+              </div>
+
+              {editingItem.type === "flashcard" && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    תְּשׁוּבָה מוּסְתֶּרֶת:
+                  </label>
+                  <input
+                    type="text"
+                    value={editingItem.answer || ""}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        answer: e.target.value,
+                      })
+                    }
+                    className="w-full px-3.5 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
+                  />
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingItem(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+                >
+                  בִּיטּוּל
+                </button>
+                <button
+                  type="submit"
+                  className="btn-glow px-5 py-2 rounded-xl bg-sky-600 text-white text-xs font-bold"
+                >
+                  שְׁמוֹר שִׁינּוּיִים
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+         IMAGE LIGHTBOX MODAL (הגדלת תמונה / ציור שמור למסך מלא)
+         ==================================================================== */}
+      {zoomedImage && (
+        <div
+          onClick={() => setZoomedImage(null)}
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex flex-col items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="max-w-4xl w-full bg-white rounded-3xl p-4 shadow-2xl space-y-3 animate-pop"
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <span className="text-sm font-extrabold text-slate-900">
+                🔍 {zoomedImage.title}
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomedImage(null)}
+                className="px-3 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700"
+              >
+                סְגוֹר ✕
+              </button>
+            </div>
+            <div className="flex items-center justify-center bg-slate-50 rounded-2xl p-2 max-h-[75vh] overflow-auto">
+              <img
+                src={zoomedImage.src}
+                alt={zoomedImage.title}
+                className="max-h-[70vh] w-auto object-contain rounded-xl"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ====================================================================
+         FULL-SCREEN INTERACTIVE SLIDE DECK PLAYER (נגן מצגת כיתתית במסך מלא)
+         ==================================================================== */}
+      {presentationIndex !== null && filteredItems.length > 0 && (
+        <div className="fixed inset-0 z-50 bg-slate-900/85 backdrop-blur-lg flex items-center justify-center p-4">
+          {(() => {
+            const safeIdx = Math.min(
+              Math.max(0, presentationIndex),
+              filteredItems.length - 1,
+            );
+            const currentSlide = filteredItems[safeIdx];
+            const isAnsRevealed = Boolean(revealedAnswers[currentSlide.id]);
+            return (
+              <div className="max-w-4xl w-full glass-strong rounded-3xl p-6 md:p-8 border-2 border-white shadow-2xl space-y-6 animate-pop max-h-[92vh] overflow-y-auto">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-3 py-1 rounded-xl bg-indigo-600 text-white text-xs font-extrabold tabular-nums">
+                      שְׁקוּפִית {safeIdx + 1} מִתּוֹךְ {filteredItems.length}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-sky-100 text-sky-800 text-xs font-bold">
+                      {currentSlide.category}
+                    </span>
+                    {currentSlide.sourceLabel && (
+                      <span className="text-xs text-slate-500 font-semibold">
+                        מקור: {currentSlide.sourceLabel}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        speak(`${currentSlide.title}. ${currentSlide.content}`)
+                      }
+                      className="btn-glow px-3.5 py-2 rounded-xl bg-sky-100 hover:bg-sky-200 text-sky-800 font-bold text-xs flex items-center gap-1.5"
+                    >
+                      <Volume2 className="w-4 h-4" />
+                      <span>הַקְרֵא שְׁקוּפִית בְּקוֹל</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPresentationIndex(null)}
+                      className="px-3.5 py-2 rounded-xl bg-rose-100 hover:bg-rose-200 text-rose-800 font-bold text-xs flex items-center gap-1"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>סִיּוּם הַצָּגָה</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 md:p-8 rounded-3xl bg-white/95 border border-sky-200 shadow-inner space-y-5 text-right">
+                  <div className="flex items-center gap-3">
+                    <span className="text-4xl">{currentSlide.emoji}</span>
+                    <h2 className="text-2xl md:text-3xl font-extrabold text-slate-900 nikud">
+                      {currentSlide.title}
+                    </h2>
+                  </div>
+
+                  <p className="text-lg md:text-xl text-slate-800 leading-relaxed whitespace-pre-line nikud">
+                    {currentSlide.content}
+                  </p>
+
+                  <BoardAttachmentView
+                    item={currentSlide}
+                    onZoomImage={(src, title) => setZoomedImage({ src, title })}
+                  />
+
+                  {currentSlide.type === "flashcard" && currentSlide.answer && (
+                    <div className="pt-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          sfx.pop();
+                          setRevealedAnswers((prev) => ({
+                            ...prev,
+                            [currentSlide.id]: !prev[currentSlide.id],
+                          }));
+                        }}
+                        className={`w-full py-3.5 px-5 rounded-2xl font-bold text-base transition-all flex items-center justify-center gap-2 border ${
+                          isAnsRevealed
+                            ? "bg-emerald-100 border-emerald-400 text-emerald-950"
+                            : "bg-amber-100 hover:bg-amber-200 border-amber-300 text-amber-950"
+                        }`}
+                      >
+                        <Sparkles className="w-5 h-5" />
+                        <span>
+                          {isAnsRevealed
+                            ? `תְּשׁוּבָה: ${currentSlide.answer}`
+                            : "לִחֲצוּ לַחֲשִׂיפַת הַתְּשׁוּבָה הַמּוּסְתֶּרֶת"}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-4 pt-2">
+                  <button
+                    type="button"
+                    disabled={safeIdx === 0}
+                    onClick={() => {
+                      sfx.click();
+                      setPresentationIndex(Math.max(0, safeIdx - 1));
+                    }}
+                    className="btn-glow px-5 py-2.5 rounded-xl bg-white disabled:opacity-40 border border-slate-200 text-slate-800 font-bold text-xs flex items-center gap-1.5"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                    <span>שְׁקוּפִית קוֹדֶמֶת</span>
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    {filteredItems.map((it, idx) => (
+                      <button
+                        key={it.id}
+                        type="button"
+                        onClick={() => setPresentationIndex(idx)}
+                        className={`h-2.5 rounded-full transition-all ${
+                          idx === safeIdx
+                            ? "w-7 bg-indigo-600"
+                            : "w-2.5 bg-slate-300 hover:bg-slate-400"
+                        }`}
+                        aria-label={`שקופית ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={safeIdx >= filteredItems.length - 1}
+                    onClick={() => {
+                      sfx.click();
+                      setPresentationIndex(
+                        Math.min(filteredItems.length - 1, safeIdx + 1),
+                      );
+                    }}
+                    className="btn-glow px-5 py-2.5 rounded-xl bg-indigo-600 disabled:opacity-40 text-white font-bold text-xs flex items-center gap-1.5"
+                  >
+                    <span>שְׁקוּפִית הַבָּאָה</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
