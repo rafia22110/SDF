@@ -1,5 +1,21 @@
 import React, { useState } from "react";
-import { Award, ShoppingBag, UserCheck } from "lucide-react";
+import {
+  Award,
+  Compass,
+  Crown,
+  Flame,
+  Glasses,
+  Headphones,
+  Palette,
+  Rocket,
+  ShoppingBag,
+  Snowflake,
+  Sparkles,
+  Star,
+  Trophy,
+  UserCheck,
+  Wand2,
+} from "lucide-react";
 import { Grade, Profile } from "../types";
 import {
   ACCESSORIES,
@@ -17,6 +33,46 @@ interface ProfileModalProps {
   onClose: () => void;
 }
 
+function renderAccessoryIcon(accId: string) {
+  switch (accId) {
+    case "crown":
+      return <Crown className="w-6 h-6 text-amber-500" />;
+    case "glasses":
+      return <Glasses className="w-6 h-6 text-sky-500" />;
+    case "halo":
+      return <Sparkles className="w-6 h-6 text-amber-400" />;
+    case "headphones":
+      return <Headphones className="w-6 h-6 text-indigo-500" />;
+    case "wand":
+      return <Wand2 className="w-6 h-6 text-violet-500" />;
+    case "hanukkah-crown":
+      return <Flame className="w-6 h-6 text-amber-500 fill-amber-400" />;
+    case "winter-spark":
+      return <Snowflake className="w-6 h-6 text-sky-500" />;
+    default:
+      return <Sparkles className="w-6 h-6 text-sky-500" />;
+  }
+}
+
+function renderBadgeIcon(badgeId: string) {
+  switch (badgeId) {
+    case "first-star":
+      return <Star className="w-6 h-6 text-amber-500 fill-amber-400" />;
+    case "island-explorer":
+      return <Compass className="w-6 h-6 text-sky-600" />;
+    case "world-traveler":
+      return <Rocket className="w-6 h-6 text-indigo-600" />;
+    case "math-whiz":
+      return <Trophy className="w-6 h-6 text-amber-500" />;
+    case "artist":
+      return <Palette className="w-6 h-6 text-pink-500" />;
+    case "super-star":
+      return <Crown className="w-6 h-6 text-amber-500 fill-amber-400" />;
+    default:
+      return <Award className="w-6 h-6 text-sky-600" />;
+  }
+}
+
 export function ProfileModal({
   profile,
   onUpdateProfile,
@@ -31,15 +87,19 @@ export function ProfileModal({
   );
 
   const handleBuyOrEquip = (accId: string, price: number) => {
-    const owned = profile.ownedAccessories.includes(accId);
+    const owned = profile.ownedAccessories.includes(accId) || price === 0;
     if (owned) {
       sfx.click();
       const nextAcc = accessory === accId ? null : accId;
       setAccessory(nextAcc);
+      const nextOwned = profile.ownedAccessories.includes(accId)
+        ? profile.ownedAccessories
+        : [...profile.ownedAccessories, accId];
       onUpdateProfile({
         ...profile,
         name,
         grade,
+        ownedAccessories: nextOwned,
         avatar: { shape, color, accessory: nextAcc },
       });
     } else if (profile.stars >= price) {
@@ -77,7 +137,9 @@ export function ProfileModal({
           <div className="flex items-center gap-3">
             <AvatarSvg config={{ shape, color, accessory }} size={64} />
             <div>
-              <h3 className="text-2xl font-bold text-slate-900 nikud">{name}</h3>
+              <h3 className="text-2xl font-bold text-slate-900 nikud">
+                {name} · תַּלְבּוֹשׁוֹת וְאוֹצָרוֹת
+              </h3>
               <p className="text-xs text-slate-600">
                 כִּיתָּה {grade}׳ · כּוֹכָבִים זְמִינִים:{" "}
                 <strong className="text-amber-600 tabular-nums">
@@ -191,22 +253,23 @@ export function ProfileModal({
             </div>
           </div>
 
-          {/* Star Accessory Shop */}
+          {/* Star Accessory Shop (Lucide Vector Icons — No Broken Box Glyphs!) */}
           <div>
             <h4 className="text-sm font-bold text-slate-900 mb-2.5 flex items-center gap-2">
               <ShoppingBag className="w-4 h-4 text-amber-500" />
-              <span>חֲנוּת אֲבִיזְרֵי הַכּוֹכָבִים:</span>
+              <span>חֲנוּת תַּלְבּוֹשׁוֹת וַאֲבִיזְרֵי הָאוֹר:</span>
             </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {ACCESSORIES.map((acc) => {
-                const owned = profile.ownedAccessories.includes(acc.id);
+                const owned =
+                  profile.ownedAccessories.includes(acc.id) || acc.price === 0;
                 const equipped = accessory === acc.id;
                 return (
                   <button
                     type="button"
                     key={acc.id}
                     onClick={() => handleBuyOrEquip(acc.id, acc.price)}
-                    className={`btn-glow p-3 rounded-2xl border text-center flex flex-col items-center gap-1 ${
+                    className={`btn-glow p-3 rounded-2xl border text-center flex flex-col items-center gap-1.5 ${
                       equipped
                         ? "bg-amber-50 border-amber-400 text-slate-900"
                         : owned
@@ -214,13 +277,15 @@ export function ProfileModal({
                           : "bg-white/80 border-slate-200 text-slate-700"
                     }`}
                   >
-                    <span className="text-2xl">{acc.emoji}</span>
+                    <div className="w-10 h-10 rounded-2xl bg-white/90 border border-slate-200/80 flex items-center justify-center shadow-2xs">
+                      {renderAccessoryIcon(acc.id)}
+                    </div>
                     <span className="text-xs font-bold nikud">{acc.name}</span>
                     <span className="text-[11px] font-semibold text-amber-600 tabular-nums">
                       {equipped
                         ? "מוּלְבָּשׁ ✓"
                         : owned
-                          ? "בִּרְשׁוּתְךָ"
+                          ? "בִּרְשׁוּתְךָ (חִינָּם)"
                           : `${acc.price} ⭐`}
                     </span>
                   </button>
@@ -233,7 +298,7 @@ export function ProfileModal({
           <div>
             <h4 className="text-sm font-bold text-slate-900 mb-2.5 flex items-center gap-2">
               <Award className="w-4 h-4 text-sky-600" />
-              <span>עִיטּוּרֵי הַכָּבוֹד שֶׁלִּי:</span>
+              <span>עִיטּוּרֵי הַכָּבוֹד וְהָאוֹצָרוֹת שֶׁלִּי:</span>
             </h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               {BADGES.map((b) => {
@@ -247,7 +312,9 @@ export function ProfileModal({
                         : "bg-white/50 border-slate-200/60 text-slate-400 opacity-65"
                     }`}
                   >
-                    <span className="text-2xl">{b.icon}</span>
+                    <div className="w-10 h-10 rounded-2xl bg-white/90 border border-slate-200/80 flex items-center justify-center shrink-0">
+                      {renderBadgeIcon(b.id)}
+                    </div>
                     <div>
                       <div className="text-xs font-bold nikud">{b.name}</div>
                       <div className="text-[11px] text-slate-500 nikud">

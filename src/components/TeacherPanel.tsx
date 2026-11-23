@@ -71,7 +71,7 @@ import {
   processDriveFileItemToBoardItems,
   createBoardItemFromExternalLinkAsync,
 } from "../services/fileProcessor";
-import { Pdf3DModelStudio } from "./Pdf3DModelStudio";
+import { SafePdf3DStudio } from "./Pdf3DErrorBoundary";
 
 interface TeacherPanelProps {
   classState: ClassState;
@@ -2032,7 +2032,7 @@ export function TeacherPanel({
 
             {/* FULL-WIDTH ROW: 3D PDF Model & Quest Studio */}
             <div className="lg:col-span-12">
-              <Pdf3DModelStudio authorName={teacherProfile.name} />
+              <SafePdf3DStudio authorName={teacherProfile.name} />
             </div>
           </div>
         </div>

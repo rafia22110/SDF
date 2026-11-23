@@ -1,5 +1,9 @@
 export type Grade = "א" | "ב" | "ג" | "ד" | "ה" | "ו";
 
+export type UserRole = "student" | "teacher" | "parent";
+
+export type UserPlan = "free_registered" | "pro" | "school";
+
 export type IslandId =
   | "letters"
   | "numbers"
@@ -40,6 +44,9 @@ export interface Profile {
   hp?: number;
   partyRole?: PartyRole;
   activeBuff?: string | null;
+  role?: UserRole;
+  plan?: UserPlan;
+  classCode?: string;
 }
 
 export interface Student {

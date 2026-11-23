@@ -1,0 +1,108 @@
+[
+  {
+    "slug": "hanukkah-2026",
+    "title": "אִי הָאוֹר וְהַמַּכַּבִּים — חֲנֻכָּה תשפ״ז",
+    "language": "he",
+    "is_active": true,
+    "requires_registration": true,
+    "presentation_url": "https://docs.google.com/presentation/d/1Cy7VmNrRGro_EY2Rxecd4GfvFW8-riPOKxDzjdjHCOw/edit?usp=drivesdk",
+    "quests_json": [
+      {
+        "day": 1,
+        "id": "hanukkah-candle-1",
+        "title": "נֵר רִאשׁוֹן: נִיצוֹץ הָאוֹתִיּוֹת בַּמְּנוֹרָה",
+        "desc": "זַהוּ אֶת הַנִּיקּוּד וְהָאוֹת הַפּוֹתַחַת בְּמִילֵּי חֲנֻכָּה (אוֹר, נֵר, כַּד).",
+        "gameId": "letters-quiz",
+        "xpReward": 50,
+        "starsReward": 5
+      },
+      {
+        "day": 2,
+        "id": "hanukkah-candle-2",
+        "title": "נֵר שֵׁנִי: סְבִיבוֹן הַמִּסְפָּרִים בְּלוּחַ הַמֵּאָה",
+        "desc": "סוֹבְבוּ אֶת הַסְּבִיבוֹן הַמָּתֵמָטִי וּפִתְרוּ חִידוֹת חִיבּוּר וְחִיסּוּר עַד 20.",
+        "gameId": "numbers-quiz",
+        "xpReward": 55,
+        "starsReward": 6
+      },
+      {
+        "day": 3,
+        "id": "hanukkah-candle-3",
+        "title": "נֵר שְׁלִישִׁי: בּוֹנִים מִילִּים שֶׁל גְּבוּרָה",
+        "desc": "הַרְכִּיבוּ מִילִּים מֵאוֹתִיּוֹת הַחַג: סְבִיבוֹן, חֲנֻכִּיָּה, מַכַּבִּים וְסוּפְגָּנִיָּה.",
+        "gameId": "word-builder",
+        "xpReward": 60,
+        "starsReward": 6
+      },
+      {
+        "day": 4,
+        "id": "hanukkah-candle-4",
+        "title": "נֵר רְבִיעִי: מַעְבָּדַת הַשֶּׁמֶן הַטָּהוֹר וְהַשַּׁלְהֶבֶת",
+        "desc": "גַּלּוּ בַּמַּעְבָּדָה כֵּיצַד שֶׁמֶן וּפְתִילָה יוֹצְרִים אוֹר חַם וּמֵאִיר.",
+        "gameId": "science-lab",
+        "xpReward": 65,
+        "starsReward": 7
+      },
+      {
+        "day": 5,
+        "id": "hanukkah-candle-5",
+        "title": "נֵר חֲמִישִׁי: מַסְלוּל רוֹבּוֹט הַמַּכַּבִּים",
+        "desc": "הַנְחוּ אֶת רוֹבּוֹט הָאוֹר בַּמְּבוֹךְ כְּדֵי לְהָבִיא אֶת פַּךְ הַשֶּׁמֶן לַהֵיכָל.",
+        "gameId": "robot-path",
+        "xpReward": 70,
+        "starsReward": 8
+      },
+      {
+        "day": 6,
+        "id": "hanukkah-candle-6",
+        "title": "נֵר שִׁישִּׁי: קוֹרְאִים בְּקוֹל אֶת שִׁירֵי הָאוֹר",
+        "desc": "קִרְאוּ בְּקוֹל רָם מִשְׁפְּטֵי חֲנֻכָּה מְנוּקָּדִים וְהָאִירוּ אֶת הַכִּיתָּה.",
+        "gameId": "voice-read",
+        "xpReward": 75,
+        "starsReward": 8
+      },
+      {
+        "day": 7,
+        "id": "hanukkah-candle-7",
+        "title": "נֵר שְׁבִיעִי: צִיּוּר חֲנֻכִּיַּת פִּיקְסֶל-אוֹר מְנַגֶּנֶת",
+        "desc": "עַצְּבוּ חֲנֻכִּיָּה זוֹהֶרֶת בִּפִיקְסֶלִים עִם מַנְגִּינַת חַג אִישִׁית.",
+        "gameId": "pixel-studio",
+        "xpReward": 80,
+        "starsReward": 10
+      },
+      {
+        "day": 8,
+        "id": "hanukkah-candle-8-boss",
+        "title": "נֵר שְׁמִינִי · קְרַב בּוֹס: נִיצְחוֹן הָאוֹר עַל הַחוֹשֶׁךְ!",
+        "desc": "הַשְׁלִימוּ אֶת אֶתְגַּר הָאוֹר הַמְּסַכֵּם וּפִתְחוּ אֶת תַּלְבּוֹשֶׁת 'כֶּתֶר אוֹר הַמַּכַּבִּים'!",
+        "gameId": "balloon-pop",
+        "xpReward": 150,
+        "starsReward": 20,
+        "isBoss": true,
+        "rewardSkinId": "hanukkah-crown"
+      }
+    ]
+  },
+  {
+    "slug": "christmas-2026",
+    "title": "Winter Spark Island — Christmas 2026",
+    "language": "en",
+    "is_active": true,
+    "requires_registration": true,
+    "presentation_url": "https://docs.google.com/presentation/d/1Cy7VmNrRGro_EY2Rxecd4GfvFW8-riPOKxDzjdjHCOw/edit?usp=drivesdk",
+    "quests_json": [
+      { "day": 1, "id": "xmas-day-1", "title": "Day 1: Starlight Alphabet Spark", "desc": "Match winter phonics and glowing letters.", "gameId": "letters-quiz", "xpReward": 45, "starsReward": 5 },
+      { "day": 2, "id": "xmas-day-2", "title": "Day 2: Snowflake Number Count", "desc": "Solve quick addition and clock puzzles.", "gameId": "numbers-quiz", "xpReward": 45, "starsReward": 5 },
+      { "day": 3, "id": "xmas-day-3", "title": "Day 3: Frosty Word Builder", "desc": "Assemble joyful holiday words from glowing tiles.", "gameId": "word-builder", "xpReward": 50, "starsReward": 6 },
+      { "day": 4, "id": "xmas-day-4", "title": "Day 4: Ice & Steam Science Lab", "desc": "Explore how snow, water, and steam transform!", "gameId": "science-lab", "xpReward": 55, "starsReward": 6 },
+      { "day": 5, "id": "xmas-day-5", "title": "Day 5: Sleigh Robot Coding Path", "desc": "Program the light robot through the snowy maze.", "gameId": "robot-path", "xpReward": 60, "starsReward": 7 },
+      { "day": 6, "id": "xmas-day-6", "title": "Day 6: Floating Star Balloons", "desc": "Pop the matching math balloons in the winter sky.", "gameId": "balloon-pop", "xpReward": 60, "starsReward": 7 },
+      { "day": 7, "id": "xmas-day-7", "title": "Day 7: Winter Story Read-Aloud", "desc": "Practice reading aloud with clear pronunciation.", "gameId": "voice-read", "xpReward": 65, "starsReward": 8 },
+      { "day": 8, "id": "xmas-day-8", "title": "Day 8: Aurora Memory Match", "desc": "Find matching pairs under the Northern Lights.", "gameId": "memory-match", "xpReward": 65, "starsReward": 8 },
+      { "day": 9, "id": "xmas-day-9", "title": "Day 9: Polar Space & Nature Quiz", "desc": "Discover winter constellations and Arctic animals.", "gameId": "science-quiz", "xpReward": 70, "starsReward": 9 },
+      { "day": 10, "id": "xmas-day-10", "title": "Day 10: Holiday Vocabulary Treasure", "desc": "Unlock synonyms, opposites, and festive expressions.", "gameId": "words-quiz", "xpReward": 75, "starsReward": 9 },
+      { "day": 11, "id": "xmas-day-11", "title": "Day 11: Pixel Snowflake Music Studio", "desc": "Paint a glowing winter crystal and compose a melody.", "gameId": "pixel-studio", "xpReward": 80, "starsReward": 10 },
+      { "day": 12, "id": "xmas-day-12-boss", "title": "Day 12 Finale: Winter Spark Boss Challenge!", "desc": "Complete the 12-day countdown to unlock the Winter Spark Outfit!", "gameId": "numbers-quiz", "xpReward": 160, "starsReward": 25, "isBoss": true, "rewardSkinId": "winter-spark" }
+    ]
+  }
+]

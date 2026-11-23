@@ -27,6 +27,7 @@ import {
   Pdf3DTheme,
   Pdf3DKnowledgeNode,
   PDF_3D_THEME_META,
+  BUILT_IN_PDF_3D_MODELS,
   getLocalPdf3DModels,
   buildPdf3DModelFromFile,
   deletePdf3DModel,
@@ -782,12 +783,18 @@ export function Pdf3DModelStudio({
   onClose?: () => void;
   onEarnRewards?: (xp: number, stars: number) => void;
 }) {
-  const [models, setModels] = useState<Pdf3DModelData[]>(() =>
-    getLocalPdf3DModels(),
-  );
-  const [activeModel, setActiveModel] = useState<Pdf3DModelData>(
-    () => initialModel || getLocalPdf3DModels()[0],
-  );
+  const [models, setModels] = useState<Pdf3DModelData[]>(() => {
+    const list = getLocalPdf3DModels();
+    return list && list.length > 0 ? list : BUILT_IN_PDF_3D_MODELS;
+  });
+  const [activeModel, setActiveModel] = useState<Pdf3DModelData>(() => {
+    const list = getLocalPdf3DModels();
+    const candidate = initialModel || (list && list[0]) || BUILT_IN_PDF_3D_MODELS[0];
+    return candidate && PDF_3D_THEME_META[candidate.theme]
+      ? candidate
+      : BUILT_IN_PDF_3D_MODELS[0];
+  });
+  const [webglFallback, setWebglFallback] = useState(false);
 
   // Studio vs Playable 3D Quest Game Mode
   const [interactionMode, setInteractionMode] = useState<"studio" | "game">(
@@ -861,334 +868,364 @@ export function Pdf3DModelStudio({
     };
   }, []);
 
-  // Main Three.js WebGL Scene Setup & Lifecycle
+  // Main Three.js WebGL Scene Setup & Lifecycle (wrapped in try/catch so missing WebGL never crashes)
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth || 800;
-    const height = container.clientHeight || 520;
+    let frameId = 0;
+    let cleanupFn: (() => void) | null = null;
 
-    const scene = new THREE.Scene();
-    const themeMeta = PDF_3D_THEME_META[activeModel.theme];
-    const bgHex = nightLighting ? themeMeta.skyTop : "#e0f2fe";
-    scene.background = new THREE.Color(bgHex);
-    scene.fog = new THREE.FogExp2(bgHex, 0.028);
+    try {
+      const width = container.clientWidth || 800;
+      const height = container.clientHeight || 520;
 
-    const camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 120);
-    camera.position.set(0, 5.6, 10.5);
+      const scene = new THREE.Scene();
+      const safeTheme: Pdf3DTheme =
+        activeModel && PDF_3D_THEME_META[activeModel.theme]
+          ? activeModel.theme
+          : "solar-system";
+      const themeMeta = PDF_3D_THEME_META[safeTheme];
+      const bgHex = nightLighting ? themeMeta.skyTop : "#e0f2fe";
+      scene.background = new THREE.Color(bgHex);
+      scene.fog = new THREE.FogExp2(bgHex, 0.028);
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: "high-performance",
-    });
+      const camera = new THREE.PerspectiveCamera(48, width / height, 0.1, 120);
+      camera.position.set(0, 5.6, 10.5);
 
-    // Mandatory isSoftwareGl Guard
-    const gl = renderer.getContext();
-    const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
-    const rendererStr = debugInfo
-      ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
-      : "";
-    const isSoftwareGl =
-      /SwiftShader|Software|llvmpipe|Eval|Basic Render Driver/i.test(
-        rendererStr,
-      );
-
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(
-      isSoftwareGl ? 1.0 : Math.min(window.devicePixelRatio, 2),
-    );
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = nightLighting ? 1.15 : 1.05;
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.shadowMap.enabled = !isSoftwareGl;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-
-    container.innerHTML = "";
-    container.appendChild(renderer.domElement);
-
-    // Studio IBL Environment via RoomEnvironment + PMREMGenerator
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    const roomEnv = new RoomEnvironment();
-    const envTarget = pmremGenerator.fromScene(roomEnv, 0.04);
-    scene.environment = envTarget.texture;
-    roomEnv.dispose();
-    pmremGenerator.dispose();
-
-    // OrbitControls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.06;
-    controls.maxPolarAngle = Math.PI / 2 - 0.04;
-    controls.minDistance = 4;
-    controls.maxDistance = 22;
-    controls.target.set(0, 1.6, 0);
-
-    // Three-Point Studio Lighting + Hemisphere Fill
-    const hemiLight = new THREE.HemisphereLight(
-      nightLighting ? 0x38bdf8 : 0xffffff,
-      nightLighting ? 0x0f172a : 0x94a3b8,
-      nightLighting ? 0.75 : 1.1,
-    );
-    hemiLight.position.set(0, 20, 0);
-    scene.add(hemiLight);
-
-    const keyLight = new THREE.DirectionalLight(
-      0xfffbeb,
-      nightLighting ? 1.8 : 2.2,
-    );
-    keyLight.position.set(7, 12, 8);
-    if (!isSoftwareGl) {
-      keyLight.castShadow = true;
-      keyLight.shadow.mapSize.set(1024, 1024);
-      keyLight.shadow.bias = -0.0005;
-    }
-    scene.add(keyLight);
-
-    const rimLight = new THREE.PointLight(
-      new THREE.Color(themeMeta.accentHex),
-      2.2,
-      18,
-    );
-    rimLight.position.set(-5, 4, -5);
-    scene.add(rimLight);
-
-    // Grounded Contact Shadow Disc
-    const shadowTex = createContactShadowTexture();
-    const shadowPlane = new THREE.Mesh(
-      new THREE.PlaneGeometry(13, 13),
-      new THREE.MeshBasicMaterial({
-        map: shadowTex,
-        transparent: true,
-        depthWrite: false,
-      }),
-    );
-    shadowPlane.rotation.x = -Math.PI / 2;
-    shadowPlane.position.y = 0.02;
-    scene.add(shadowPlane);
-
-    // Build Procedural 3D Scene for the Active PDF Theme
-    const built = buildProceduralSceneGroup(activeModel.theme, wireframe);
-    scene.add(built.rootGroup);
-
-    // Build 4 Interactive 3D PDF Knowledge Beacons around the island
-    const beaconPositions = [
-      new THREE.Vector3(-3.3, 1.15, 2.2),
-      new THREE.Vector3(3.3, 1.15, 2.2),
-      new THREE.Vector3(-3.1, 1.15, -2.4),
-      new THREE.Vector3(3.1, 1.15, -2.4),
-    ];
-
-    const beaconMeshes: THREE.Object3D[] = [];
-    const nodes = activeModel.nodes.slice(0, 4);
-
-    nodes.forEach((node, idx) => {
-      const pos = beaconPositions[idx % beaconPositions.length];
-      const beaconGroup = new THREE.Group();
-      beaconGroup.position.copy(pos);
-      beaconGroup.userData = { nodeIndex: idx, nodeId: node.id };
-
-      const isCollected = collectedIdsRef.current.includes(node.id);
-      const crystalMat = new THREE.MeshStandardMaterial({
-        color: isCollected ? 0x10b981 : new THREE.Color(node.colorHex),
-        emissive: isCollected ? 0x059669 : new THREE.Color(node.colorHex),
-        emissiveIntensity: 0.65,
-        roughness: 0.2,
-        metalness: 0.7,
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        powerPreference: "high-performance",
       });
-      const crystal = new THREE.Mesh(
-        new THREE.OctahedronGeometry(0.46, 0),
-        crystalMat,
+
+      // Mandatory isSoftwareGl Guard
+      const gl = renderer.getContext();
+      if (!gl) {
+        throw new Error("WebGL context unavailable");
+      }
+      const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+      const rendererStr = debugInfo
+        ? String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
+        : "";
+      const isSoftwareGl =
+        /SwiftShader|Software|llvmpipe|Eval|Basic Render Driver/i.test(
+          rendererStr,
+        );
+
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(
+        isSoftwareGl ? 1.0 : Math.min(window.devicePixelRatio || 1, 2),
       );
-      crystal.userData = { nodeIndex: idx, nodeId: node.id };
-      beaconGroup.add(crystal);
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = nightLighting ? 1.15 : 1.05;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.shadowMap.enabled = !isSoftwareGl;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-      // Numbered Sprite above crystal
-      const badgeTex = createNodeBadgeTexture(
-        String(idx + 1),
-        node.colorHex,
-        isCollected,
+      container.innerHTML = "";
+      container.appendChild(renderer.domElement);
+
+      // Studio IBL Environment via RoomEnvironment + PMREMGenerator
+      let envTarget: THREE.WebGLRenderTarget | null = null;
+      try {
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        const roomEnv = new RoomEnvironment();
+        envTarget = pmremGenerator.fromScene(roomEnv, 0.04);
+        scene.environment = envTarget.texture;
+        roomEnv.dispose();
+        pmremGenerator.dispose();
+      } catch {
+        /* continue without PMREM if unsupported */
+      }
+
+      // OrbitControls
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.maxPolarAngle = Math.PI / 2 - 0.04;
+      controls.minDistance = 4;
+      controls.maxDistance = 22;
+      controls.target.set(0, 1.6, 0);
+
+      // Three-Point Studio Lighting + Hemisphere Fill
+      const hemiLight = new THREE.HemisphereLight(
+        nightLighting ? 0x38bdf8 : 0xffffff,
+        nightLighting ? 0x0f172a : 0x94a3b8,
+        nightLighting ? 0.75 : 1.1,
       );
-      const sprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: badgeTex, transparent: true }),
+      hemiLight.position.set(0, 20, 0);
+      scene.add(hemiLight);
+
+      const keyLight = new THREE.DirectionalLight(
+        0xfffbeb,
+        nightLighting ? 1.8 : 2.2,
       );
-      sprite.scale.set(0.85, 0.85, 1);
-      sprite.position.set(0, 0.85, 0);
-      sprite.userData = { nodeIndex: idx, nodeId: node.id };
-      beaconGroup.add(sprite);
+      keyLight.position.set(7, 12, 8);
+      if (!isSoftwareGl) {
+        keyLight.castShadow = true;
+        keyLight.shadow.mapSize.set(1024, 1024);
+        keyLight.shadow.bias = -0.0005;
+      }
+      scene.add(keyLight);
 
-      scene.add(beaconGroup);
-      beaconMeshes.push(beaconGroup);
-    });
+      const rimLight = new THREE.PointLight(
+        new THREE.Color(themeMeta.accentHex),
+        2.2,
+        18,
+      );
+      rimLight.position.set(-5, 4, -5);
+      scene.add(rimLight);
 
-    // 3D Player Explorer Robot for Playable Quest Game Mode
-    const playerGroup = new THREE.Group();
-    playerGroup.position.set(0, 0.55, 3.6);
-    playerTargetRef.current.set(0, 0.55, 3.6);
+      // Grounded Contact Shadow Disc
+      const shadowTex = createContactShadowTexture();
+      const shadowPlane = new THREE.Mesh(
+        new THREE.PlaneGeometry(13, 13),
+        new THREE.MeshBasicMaterial({
+          map: shadowTex,
+          transparent: true,
+          depthWrite: false,
+        }),
+      );
+      shadowPlane.rotation.x = -Math.PI / 2;
+      shadowPlane.position.y = 0.02;
+      scene.add(shadowPlane);
 
-    const playerBody = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.28, 0.45, 8, 16),
-      new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
-        emissive: 0x0284c7,
-        emissiveIntensity: 0.4,
-        roughness: 0.25,
-        metalness: 0.7,
-      }),
-    );
-    playerBody.position.y = 0.45;
-    playerGroup.add(playerBody);
+      // Build Procedural 3D Scene for the Active PDF Theme
+      const built = buildProceduralSceneGroup(safeTheme, wireframe);
+      scene.add(built.rootGroup);
 
-    const playerCrown = new THREE.Mesh(
-      new THREE.TorusGeometry(0.32, 0.05, 12, 24),
-      new THREE.MeshStandardMaterial({
-        color: 0xfbbf24,
-        emissive: 0xf59e0b,
-        emissiveIntensity: 0.7,
-      }),
-    );
-    playerCrown.rotation.x = Math.PI / 2;
-    playerCrown.position.y = 0.95;
-    playerGroup.add(playerCrown);
-    scene.add(playerGroup);
+      // Build 4 Interactive 3D PDF Knowledge Beacons around the island
+      const beaconPositions = [
+        new THREE.Vector3(-3.3, 1.15, 2.2),
+        new THREE.Vector3(3.3, 1.15, 2.2),
+        new THREE.Vector3(-3.1, 1.15, -2.4),
+        new THREE.Vector3(3.1, 1.15, -2.4),
+      ];
 
-    // Raycaster for clicking 3D Beacons or Click-to-Move on the pedestal
-    const raycaster = new THREE.Raycaster();
-    const pointer = new THREE.Vector2();
+      const beaconMeshes: THREE.Object3D[] = [];
+      const nodes = (activeModel?.nodes || []).slice(0, 4);
 
-    const onPointerDown = (ev: PointerEvent) => {
-      const rect = renderer.domElement.getBoundingClientRect();
-      pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
-      pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
-      raycaster.setFromCamera(pointer, camera);
+      nodes.forEach((node, idx) => {
+        const pos = beaconPositions[idx % beaconPositions.length];
+        const beaconGroup = new THREE.Group();
+        beaconGroup.position.copy(pos);
+        beaconGroup.userData = { nodeIndex: idx, nodeId: node.id };
 
-      const hits = raycaster.intersectObjects(beaconMeshes, true);
-      if (hits.length > 0) {
-        let obj: THREE.Object3D | null = hits[0].object;
-        while (obj && obj.userData?.nodeIndex === undefined) {
-          obj = obj.parent;
-        }
-        const clickedIndex = obj?.userData?.nodeIndex;
-        if (typeof clickedIndex === "number") {
-          sfx.pop();
-          setActiveNodeIndex(clickedIndex);
-          const targetNode = nodes[clickedIndex];
-          if (targetNode) {
-            if (modeRef.current === "game" && gameStateRef.current === "playing") {
-              playerTargetRef.current.copy(
-                beaconPositions[clickedIndex % beaconPositions.length],
-              );
-            } else {
-              speak(`${targetNode.title}. ${targetNode.fact}`);
+        const isCollected = collectedIdsRef.current.includes(node.id);
+        const crystalMat = new THREE.MeshStandardMaterial({
+          color: isCollected ? 0x10b981 : new THREE.Color(node.colorHex),
+          emissive: isCollected ? 0x059669 : new THREE.Color(node.colorHex),
+          emissiveIntensity: 0.65,
+          roughness: 0.2,
+          metalness: 0.7,
+        });
+        const crystal = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.46, 0),
+          crystalMat,
+        );
+        crystal.userData = { nodeIndex: idx, nodeId: node.id };
+        beaconGroup.add(crystal);
+
+        // Numbered Sprite above crystal
+        const badgeTex = createNodeBadgeTexture(
+          String(idx + 1),
+          node.colorHex,
+          isCollected,
+        );
+        const sprite = new THREE.Sprite(
+          new THREE.SpriteMaterial({ map: badgeTex, transparent: true }),
+        );
+        sprite.scale.set(0.85, 0.85, 1);
+        sprite.position.set(0, 0.85, 0);
+        sprite.userData = { nodeIndex: idx, nodeId: node.id };
+        beaconGroup.add(sprite);
+
+        scene.add(beaconGroup);
+        beaconMeshes.push(beaconGroup);
+      });
+
+      // 3D Player Explorer Robot for Playable Quest Game Mode
+      const playerGroup = new THREE.Group();
+      playerGroup.position.set(0, 0.55, 3.6);
+      playerTargetRef.current.set(0, 0.55, 3.6);
+
+      const playerBody = new THREE.Mesh(
+        new THREE.CapsuleGeometry(0.28, 0.45, 8, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x38bdf8,
+          emissive: 0x0284c7,
+          emissiveIntensity: 0.4,
+          roughness: 0.25,
+          metalness: 0.7,
+        }),
+      );
+      playerBody.position.y = 0.45;
+      playerGroup.add(playerBody);
+
+      const playerCrown = new THREE.Mesh(
+        new THREE.TorusGeometry(0.32, 0.05, 12, 24),
+        new THREE.MeshStandardMaterial({
+          color: 0xfbbf24,
+          emissive: 0xf59e0b,
+          emissiveIntensity: 0.7,
+        }),
+      );
+      playerCrown.rotation.x = Math.PI / 2;
+      playerCrown.position.y = 0.95;
+      playerGroup.add(playerCrown);
+      scene.add(playerGroup);
+
+      // Raycaster for clicking 3D Beacons or Click-to-Move on the pedestal
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+
+      const onPointerDown = (ev: PointerEvent) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+
+        const hits = raycaster.intersectObjects(beaconMeshes, true);
+        if (hits.length > 0) {
+          let obj: THREE.Object3D | null = hits[0].object;
+          while (obj && obj.userData?.nodeIndex === undefined) {
+            obj = obj.parent;
+          }
+          const clickedIndex = obj?.userData?.nodeIndex;
+          if (typeof clickedIndex === "number") {
+            sfx.pop();
+            setActiveNodeIndex(clickedIndex);
+            const targetNode = nodes[clickedIndex];
+            if (targetNode) {
+              if (
+                modeRef.current === "game" &&
+                gameStateRef.current === "playing"
+              ) {
+                playerTargetRef.current.copy(
+                  beaconPositions[clickedIndex % beaconPositions.length],
+                );
+              } else {
+                speak(`${targetNode.title}. ${targetNode.fact}`);
+              }
             }
           }
         }
-      }
-    };
-    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+      };
+      renderer.domElement.addEventListener("pointerdown", onPointerDown);
 
-    // Animation Loop
-    const clock = new THREE.Clock();
-    let frameId = 0;
+      // Animation Loop
+      const clock = new THREE.Clock();
 
-    const animate = () => {
-      frameId = requestAnimationFrame(animate);
-      const delta = Math.min(clock.getDelta(), 0.1);
-      const elapsed = clock.getElapsedTime();
+      const animate = () => {
+        frameId = requestAnimationFrame(animate);
+        const delta = Math.min(clock.getDelta(), 0.1);
+        const elapsed = clock.getElapsedTime();
 
-      built.animatedTick(elapsed);
+        built.animatedTick(elapsed);
 
-      // Smooth Explode / Assemble interpolation
-      const targetOffset = explodedRef.current ? 1.35 : 0;
-      for (const part of built.explodableParts) {
-        const desired = part.basePos
-          .clone()
-          .addScaledVector(part.dir, targetOffset);
-        part.obj.position.lerp(desired, 0.08);
-      }
-
-      // Rotate & bob the 4 PDF Knowledge Beacons
-      beaconMeshes.forEach((bGroup, idx) => {
-        const baseY = beaconPositions[idx % beaconPositions.length].y;
-        bGroup.position.y = baseY + Math.sin(elapsed * 2.4 + idx) * 0.16;
-        if (bGroup.children[0]) {
-          bGroup.children[0].rotation.y = elapsed * 1.4 + idx;
+        // Smooth Explode / Assemble interpolation
+        const targetOffset = explodedRef.current ? 1.35 : 0;
+        for (const part of built.explodableParts) {
+          const desired = part.basePos
+            .clone()
+            .addScaledVector(part.dir, targetOffset);
+          part.obj.position.lerp(desired, 0.08);
         }
-      });
 
-      // Handle 3D Explorer Player movement in Game Mode
-      playerGroup.visible = modeRef.current === "game";
-      if (modeRef.current === "game" && gameStateRef.current === "playing") {
-        const speed = 4.2 * delta;
-        const keys = keysPressedRef.current;
-        if (keys["KeyW"] || keys["ArrowUp"]) {
-          playerTargetRef.current.z -= speed;
-        }
-        if (keys["KeyS"] || keys["ArrowDown"]) {
-          playerTargetRef.current.z += speed;
-        }
-        if (keys["KeyA"] || keys["ArrowLeft"]) {
-          playerTargetRef.current.x -= speed;
-        }
-        if (keys["KeyD"] || keys["ArrowRight"]) {
-          playerTargetRef.current.x += speed;
-        }
-        // Clamp to pedestal radius
-        const len2D = Math.hypot(
-          playerTargetRef.current.x,
-          playerTargetRef.current.z,
-        );
-        if (len2D > 4.4) {
-          playerTargetRef.current.x = (playerTargetRef.current.x / len2D) * 4.4;
-          playerTargetRef.current.z = (playerTargetRef.current.z / len2D) * 4.4;
-        }
-        playerGroup.position.lerp(playerTargetRef.current, 0.15);
-        playerCrown.rotation.z = elapsed * 2.5;
-
-        // Check proximity to uncollected PDF Knowledge Beacons
-        nodes.forEach((node, idx) => {
-          if (collectedIdsRef.current.includes(node.id)) return;
-          const bPos = beaconPositions[idx % beaconPositions.length];
-          const dist = Math.hypot(
-            playerGroup.position.x - bPos.x,
-            playerGroup.position.z - bPos.z,
-          );
-          if (dist < 0.95) {
-            sfx.correct();
-            setActiveNodeIndex(idx);
-            setActiveQuizNode(node);
-            setGameState("quiz");
+        // Rotate & bob the 4 PDF Knowledge Beacons
+        beaconMeshes.forEach((bGroup, idx) => {
+          const baseY = beaconPositions[idx % beaconPositions.length].y;
+          bGroup.position.y = baseY + Math.sin(elapsed * 2.4 + idx) * 0.16;
+          if (bGroup.children[0]) {
+            bGroup.children[0].rotation.y = elapsed * 1.4 + idx;
           }
         });
-      }
 
-      controls.autoRotate =
-        autoRotateRef.current && modeRef.current === "studio";
-      controls.autoRotateSpeed = 1.1;
-      controls.update();
+        // Handle 3D Explorer Player movement in Game Mode
+        playerGroup.visible = modeRef.current === "game";
+        if (modeRef.current === "game" && gameStateRef.current === "playing") {
+          const speed = 4.2 * delta;
+          const keys = keysPressedRef.current;
+          if (keys["KeyW"] || keys["ArrowUp"]) {
+            playerTargetRef.current.z -= speed;
+          }
+          if (keys["KeyS"] || keys["ArrowDown"]) {
+            playerTargetRef.current.z += speed;
+          }
+          if (keys["KeyA"] || keys["ArrowLeft"]) {
+            playerTargetRef.current.x -= speed;
+          }
+          if (keys["KeyD"] || keys["ArrowRight"]) {
+            playerTargetRef.current.x += speed;
+          }
+          // Clamp to pedestal radius
+          const len2D = Math.hypot(
+            playerTargetRef.current.x,
+            playerTargetRef.current.z,
+          );
+          if (len2D > 4.4) {
+            playerTargetRef.current.x =
+              (playerTargetRef.current.x / len2D) * 4.4;
+            playerTargetRef.current.z =
+              (playerTargetRef.current.z / len2D) * 4.4;
+          }
+          playerGroup.position.lerp(playerTargetRef.current, 0.15);
+          playerCrown.rotation.z = elapsed * 2.5;
 
-      renderer.render(scene, camera);
-    };
-    animate();
+          // Check proximity to uncollected PDF Knowledge Beacons
+          nodes.forEach((node, idx) => {
+            if (collectedIdsRef.current.includes(node.id)) return;
+            const bPos = beaconPositions[idx % beaconPositions.length];
+            const dist = Math.hypot(
+              playerGroup.position.x - bPos.x,
+              playerGroup.position.z - bPos.z,
+            );
+            if (dist < 0.95) {
+              sfx.correct();
+              setActiveNodeIndex(idx);
+              setActiveQuizNode(node);
+              setGameState("quiz");
+            }
+          });
+        }
 
-    const onResize = () => {
-      if (!container) return;
-      const w = container.clientWidth || 800;
-      const h = container.clientHeight || 520;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    window.addEventListener("resize", onResize);
+        controls.autoRotate =
+          autoRotateRef.current && modeRef.current === "studio";
+        controls.autoRotateSpeed = 1.1;
+        controls.update();
+
+        renderer.render(scene, camera);
+      };
+      animate();
+      setWebglFallback(false);
+
+      const onResize = () => {
+        if (!container) return;
+        const w = container.clientWidth || 800;
+        const h = container.clientHeight || 520;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      };
+      window.addEventListener("resize", onResize);
+
+      cleanupFn = () => {
+        cancelAnimationFrame(frameId);
+        window.removeEventListener("resize", onResize);
+        renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+        controls.dispose();
+        shadowTex.dispose();
+        envTarget?.dispose();
+        renderer.dispose();
+      };
+    } catch (err) {
+      console.warn("WebGL unavailable, switching to interactive 2.5D mode:", err);
+      setWebglFallback(true);
+    }
 
     return () => {
       cancelAnimationFrame(frameId);
-      window.removeEventListener("resize", onResize);
-      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
-      controls.dispose();
-      shadowTex.dispose();
-      envTarget.dispose();
-      renderer.dispose();
+      cleanupFn?.();
     };
   }, [activeModel, wireframe, nightLighting, collectedNodeIds]);
 
@@ -1406,6 +1443,63 @@ export function Pdf3DModelStudio({
       <div className="relative w-full h-[500px] md:h-[560px] bg-slate-950 overflow-hidden select-none">
         {/* Three.js Canvas Mount */}
         <div ref={mountRef} className="w-full h-full" />
+
+        {/* Interactive 2.5D Fallback Canvas if WebGL context is unavailable */}
+        {webglFallback && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 bg-gradient-to-b from-slate-900 via-slate-950 to-sky-950">
+            <div className="text-center space-y-2 mb-4">
+              <div className="text-5xl">
+                {
+                  (
+                    PDF_3D_THEME_META[activeModel?.theme || "solar-system"] ||
+                    PDF_3D_THEME_META["solar-system"]
+                  ).emoji
+                }
+              </div>
+              <div className="text-sm font-extrabold text-sky-300 nikud">
+                {activeModel?.title} · תְּצוּגַת מַעְבָּדָה אִינְטֶרְאַקְטִיבִית
+              </div>
+              <p className="text-xs text-slate-400 max-w-md">
+                לִחֲצוּ עַל גְּבִישֵׁי הַיֶּדַע 1–4 כְּדֵי לַחְקוֹר אֶת תּוֹכֶן ה-PDF וְלִפְתּוֹר אֶת הַחִידוֹת!
+              </p>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-2xl w-full">
+              {(activeModel?.nodes || []).slice(0, 4).map((nd, idx) => {
+                const done = collectedNodeIds.includes(nd.id);
+                return (
+                  <button
+                    key={nd.id}
+                    type="button"
+                    onClick={() => {
+                      sfx.pop();
+                      setActiveNodeIndex(idx);
+                      if (interactionMode === "game" && gameState === "playing") {
+                        setActiveQuizNode(nd);
+                        setGameState("quiz");
+                      } else {
+                        speak(`${nd.title}. ${nd.fact}`);
+                      }
+                    }}
+                    className={`p-3.5 rounded-2xl border-2 text-center transition-all ${
+                      done
+                        ? "bg-emerald-950/90 border-emerald-400 text-emerald-200"
+                        : activeNodeIndex === idx
+                          ? "bg-sky-900/90 border-sky-400 text-white"
+                          : "bg-slate-900/90 border-slate-700 text-slate-200 hover:border-sky-400"
+                    }`}
+                  >
+                    <div className="text-lg font-extrabold">
+                      {done ? "✓" : `גביש ${idx + 1}`}
+                    </div>
+                    <div className="text-xs font-bold mt-1 truncate nikud">
+                      {nd.title}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Toast Notification */}
         {toastMsg && (

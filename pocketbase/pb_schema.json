@@ -1,0 +1,54 @@
+[
+  {
+    "name": "classrooms",
+    "type": "base",
+    "listRule": "@request.auth.id != '' && (teacher = @request.auth.id || join_code = @request.auth.class_code)",
+    "viewRule": "@request.auth.id != '' && (teacher = @request.auth.id || join_code = @request.auth.class_code)",
+    "createRule": "@request.auth.role = 'teacher'",
+    "updateRule": "teacher = @request.auth.id",
+    "deleteRule": "teacher = @request.auth.id",
+    "fields": [
+      { "name": "teacher", "type": "relation", "required": true, "maxSelect": 1, "collectionId": "_pb_users_auth_" },
+      { "name": "name", "type": "text", "required": true },
+      { "name": "join_code", "type": "text", "required": true },
+      { "name": "grade", "type": "text", "required": false },
+      { "name": "schedule_json", "type": "json", "required": false }
+    ]
+  },
+  {
+    "name": "student_progress",
+    "type": "base",
+    "listRule": "student = @request.auth.id || classroom.teacher = @request.auth.id",
+    "viewRule": "student = @request.auth.id || classroom.teacher = @request.auth.id",
+    "createRule": "@request.auth.id != '' && student = @request.auth.id",
+    "updateRule": "student = @request.auth.id",
+    "deleteRule": "classroom.teacher = @request.auth.id",
+    "fields": [
+      { "name": "student", "type": "relation", "required": true, "maxSelect": 1, "collectionId": "_pb_users_auth_" },
+      { "name": "classroom", "type": "relation", "required": false, "maxSelect": 1, "collectionId": "classrooms" },
+      { "name": "island_id", "type": "text", "required": true },
+      { "name": "stage_id", "type": "text", "required": true },
+      { "name": "xp_earned", "type": "number", "required": false },
+      { "name": "stars_earned", "type": "number", "required": false },
+      { "name": "completed", "type": "bool", "required": false }
+    ]
+  },
+  {
+    "name": "seasonal_islands",
+    "type": "base",
+    "listRule": "is_active = true",
+    "viewRule": "is_active = true",
+    "createRule": null,
+    "updateRule": null,
+    "deleteRule": null,
+    "fields": [
+      { "name": "slug", "type": "text", "required": true },
+      { "name": "title", "type": "text", "required": true },
+      { "name": "language", "type": "select", "required": true, "values": ["he", "en"], "maxSelect": 1 },
+      { "name": "is_active", "type": "bool", "required": false },
+      { "name": "requires_registration", "type": "bool", "required": false },
+      { "name": "presentation_url", "type": "url", "required": false },
+      { "name": "quests_json", "type": "json", "required": false }
+    ]
+  }
+]

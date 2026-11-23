@@ -59,9 +59,9 @@ import {
   DriveFileItem,
 } from "../services/workspaceAuth";
 import {
-  Pdf3DModelStudio,
   Pdf3DInlineCardBanner,
 } from "./Pdf3DModelStudio";
+import { SafePdf3DStudio } from "./Pdf3DErrorBoundary";
 import {
   getLocalPdf3DModels,
   Pdf3DModelData,
@@ -2372,7 +2372,7 @@ export function SmartBoard({
       {/* ====================================================================
          3. CALM VIEW & TOOLS BAR (מעבר בין הלוח ומעבדות העזר)
          ==================================================================== */}
-      <div className="flex flex-wrap items-center justify-between gap-3 glass rounded-2xl p-2.5">
+      <div className="relative z-10 scroll-mt-24 flex flex-wrap items-center justify-between gap-3 glass rounded-2xl p-2.5">
         {/* Sub-Tabs: Main Board vs Interactive Manipulatives */}
         <div className="flex flex-wrap items-center gap-1.5">
           <button
@@ -2703,14 +2703,14 @@ export function SmartBoard({
          SUBTAB: INTERACTIVE 3D PDF MODEL & QUEST STUDIO (אולפן תלת-ממד מקבצי PDF)
          ==================================================================== */}
       {subTab === "pdf3d" && (
-        <div className="space-y-4 animate-pop">
-          <Pdf3DModelStudio
+        <div className="relative z-10 scroll-mt-24 space-y-4 animate-pop">
+          <SafePdf3DStudio
             initialModel={selectedPdf3DModel}
             authorName={userName}
             onClose={() => setSubTab("workspace")}
             onEarnRewards={(xp, stars) => {
               showBoardNotification(
-                `כל הכבוד! השלמתם חקר מודל PDF בתלת־ממד וזכיתם ב-+${xp} XP ו-+${stars} ⭐!`,
+                `כל הכבוד! השלמתם חקר מודל PDF בתלת־ממד וזכיתם ב-+${xp} נקודות אור ו-+${stars} ⭐!`,
               );
             }}
           />
@@ -3005,7 +3005,11 @@ export function SmartBoard({
                     }}
                     className="btn-glow px-3.5 py-2 rounded-xl bg-white/85 border border-slate-200 text-xs font-bold text-slate-700 tabular-nums"
                   >
-                    {sec < 60 ? `${sec} שניות` : `${sec / 60} דקות`}
+                    {sec < 60
+                      ? `${sec} שְׁנִיּוֹת`
+                      : sec === 60
+                        ? "דַּקָּה אַחַת"
+                        : `${sec / 60} דַּקּוֹת`}
                   </button>
                 ))}
               </div>

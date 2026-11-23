@@ -232,6 +232,8 @@ export const ACCESSORIES: AccessoryDef[] = [
   { id: "halo", name: "הִילַּת כּוֹכָבִים", price: 20, emoji: "✨" },
   { id: "headphones", name: "אוֹזְנִיּוֹת קֶצֶב", price: 12, emoji: "🎧" },
   { id: "wand", name: "שַׁרְבִיט אוֹר", price: 25, emoji: "🪄" },
+  { id: "hanukkah-crown", name: "כֶּתֶר אוֹר הַמַּכַּבִּים", price: 0, emoji: "🕎" },
+  { id: "winter-spark", name: "נִיצוֹץ הַחוֹרֶף", price: 0, emoji: "❄️" },
 ];
 
 export const AVATAR_SHAPES = [

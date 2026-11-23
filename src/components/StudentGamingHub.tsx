@@ -53,46 +53,46 @@ export const PARTY_ROLES_INFO: Record<
   }
 > = {
   tank: {
-    title: "הַטַּנְק הַמּוֹבִיל",
-    engTitle: "Tank",
+    title: "הַמָּגֵן הַמּוֹבִיל",
+    engTitle: "מוביל הקבוצה",
     emoji: "🛡️",
     badgeClass: "bg-sky-100 text-sky-900 border-sky-300",
-    desc: "מֵעִיז לִפְתּוֹחַ נוֹשְׂאִים חֲדָשִׁים, שׁוֹאֵל שְׁאֵלוֹת אַמִּיצוֹת וּמוֹבִיל אֶת הַפְּלָאטוֹן קָדִימָה!",
-    superpower: "+15% XP בִּפְתִיחַת עֲנַף מְיוּמָנוּת חָדָשׁ",
+    desc: "מֵעִיז לִפְתּוֹחַ נוֹשְׂאִים חֲדָשִׁים, שׁוֹאֵל שְׁאֵלוֹת אַמִּיצוֹת וּמוֹבִיל אֶת הַקְּבוּצָה קָדִימָה!",
+    superpower: "+15% נְקוּדּוֹת אוֹר בִּפְתִיחַת עֲנַף מְיוּמָנוּת חָדָשׁ",
   },
   healer: {
-    title: "הַהִילֶר הַתּוֹמֵךְ",
-    engTitle: "Healer",
+    title: "הַחָבֵר הַתּוֹמֵךְ",
+    engTitle: "עוזר ומעודד",
     emoji: "💚",
     badgeClass: "bg-emerald-100 text-emerald-900 border-emerald-300",
-    desc: "מַסְבִּיר בְּסַבְלָנוּת לַחֲבֵרִים, מְחַלֵּק 'בָּאפִים' שֶׁל עִידּוּד וּמְסַיֵּיעַ כְּשֶׁמִּישֶׁהוּ נִתְקָע!",
-    superpower: "מְמַלֵּא מַד HP וְנוֹתֵן בָּאף רֶמֶז לַקְּבוּצָה",
+    desc: "מַסְבִּיר בְּסַבְלָנוּת לַחֲבֵרִים, מְחַלֵּק חִיזּוּקִים שֶׁל עִידּוּד וּמְסַיֵּיעַ כְּשֶׁמִּישֶׁהוּ נִתְקָע!",
+    superpower: "מְמַלֵּא מַד כּוֹחַ וְקֶשֶׁב וְנוֹתֵן בּוֹנוּס רֶמֶז לַקְּבוּצָה",
   },
   dps: {
     title: "אַלּוּף הַבִּיצּוּעַ",
-    engTitle: "DPS / Mage",
+    engTitle: "פותר אתגרים",
     emoji: "⚔️",
     badgeClass: "bg-amber-100 text-amber-900 border-amber-300",
     desc: "מְפַצֵּחַ אֶתְגָּרִים בִּמְהִירוּת, מֵפִיק תּוֹצָרִים יְצִירָתִיִּים וּמַכְנִיעַ קְרָבוֹת בּוֹס!",
-    superpower: "נֶזֶק כָּפוּל לְנקוּדוֹת הַתּוֹרְפָּה בִּקְרָבוֹת בּוֹס",
+    superpower: "כּוֹחַ כָּפוּל לְנקוּדוֹת הַתּוֹרְפָּה בִּקְרָבוֹת בּוֹס",
   },
 };
 
 export const CLASS_BUFFS = [
   {
     id: "buff-hint",
-    name: "💡 בָּאף הַהֶסְבֵּר הַחָכָם (Buff)",
-    desc: "חִיזּוּק מֵהַמּוֹרֶה אוֹ מֵחָבֵר: פּוֹתֵחַ רְמָזִים מְאִירֵי עֵינַיִם וּמַעֲלֶה כּוֹחַ לְמִידָה בְּ-+20% XP!",
+    name: "💡 חִיזּוּק הַהֶסְבֵּר הַחָכָם",
+    desc: "חִיזּוּק מֵהַמּוֹרֶה אוֹ מֵחָבֵר: פּוֹתֵחַ רְמָזִים מְאִירֵי עֵינַיִם וּמַעֲלֶה כּוֹחַ לְמִידָה בְּ-+20% נְקוּדּוֹת אוֹר!",
   },
   {
     id: "buff-checkpoint",
-    name: "🚩 בָּאף מָגֵן הַצֶּ'קְפּוֹינְט (Checkpoint Shield)",
-    desc: "טָעוּת לֹא מוֹחֶקֶת הִתְקַדְּמוּת! שׁוֹמֵר עַל הָרֶצֶף וּמְאַפְשֵׁר Try Again חָכָם יוֹתֵר.",
+    name: "🚩 מָגֵן נְקוּדַת הַשְּׁמִירָה",
+    desc: "טָעוּת לֹא מוֹחֶקֶת הִתְקַדְּמוּת! שׁוֹמֵר עַל הָרֶצֶף וּמְאַפְשֵׁר נִיסָּיוֹן נוֹסָף חָכָם יוֹתֵר.",
   },
   {
     id: "buff-coop",
-    name: "🤝 בָּאף קוֹ-אוֹפּ כִּיתָּתִי (Co-op Synergy)",
-    desc: "עֲבוֹדָה בְּזוּגוֹת אוֹ בִּקְבוּצָה מַכְפִּילָה אֶת כּוֹכְבֵי הַשָּׁלָל (Loot) בְּסוֹף הַשִּׁיעוּר!",
+    name: "🤝 כּוֹחַ שִׁיתּוּף הַפְּעוּלָה הַכִּיתָּתִי",
+    desc: "עֲבוֹדָה בְּזוּגוֹת אוֹ בִּקְבוּצָה מַכְפִּילָה אֶת כּוֹכְבֵי הָאוֹצָר בְּסוֹף הַשִּׁיעוּר!",
   },
 ];
 
@@ -175,40 +175,40 @@ export const GAMING_PEDAGOGY_GLOSSARY = [
     category: "1. תַּהֲלִיךְ הַלְּמִידָה וְהִתְקַדְּמוּת",
     items: [
       {
-        term: "עֲלִיַּית שָׁלָב (Level Up)",
+        term: "עֲלִיַּית שָׁלָב וְרָמָה",
         emoji: "🆙",
         meaning: "שְׁלִיטָה בִּמְיוּמָנוּת חֲדָשָׁה אוֹ סִיּוּם נוֹשֵׂא!",
         pedagogy:
-          "בִּמְקוֹם לוֹמַר 'סִיַּימְנוּ פֶּרֶק', אֲנַחְנוּ עוֹשִׂים Level Up — הַיְּכוֹלוֹת שֶׁלְּךָ עָלוּ בִּזְכוּת הַמַּאֲמָץ שֶׁלְּךָ!",
+          "בִּמְקוֹם לוֹמַר 'סִיַּימְנוּ פֶּרֶק', אֲנַחְנוּ עוֹלִים רָמָה — הַיְּכוֹלוֹת שֶׁלְּךָ עָלוּ בִּזְכוּת הַמַּאֲמָץ שֶׁלְּךָ!",
       },
       {
-        term: "מַדַּד נִיסָּיוֹן (XP - Experience Points)",
+        term: "מַדַּד נְקוּדּוֹת אוֹר וְנִיסָּיוֹן",
         emoji: "✨",
         meaning: "נְקוּדּוֹת שֶׁמִּצְטַבְּרוֹת עַל כָּל תַּרְגּוּל, הִשְׁתַּתְּפוּת וְנִיסָּיוֹן.",
         pedagogy:
-          "XP אֵינוֹ צִיּוּן מַלְחִיץ שֶׁל מִבְחָן — הוּא תָּמִיד עוֹלֶה כְּכָל שֶׁמִּתְאַמְּצִים וּמְנַסִּים!",
+          "נְקוּדּוֹת הָאוֹר אֵינָן צִיּוּן מַלְחִיץ שֶׁל מִבְחָן — הֵן תָּמִיד עוֹלוֹת כְּכָל שֶׁמִּתְאַמְּצִים וּמְנַסִּים!",
       },
       {
-        term: "עֵץ מְיוּמָנוּיוֹת (Skill Tree)",
+        term: "עֵץ הַמְּיוּמָנוּיוֹת",
         emoji: "🌳",
         meaning: "מַפַּת הַמַּסְלוּל הַלִּימּוּדִי שֶׁלְּךָ בָּאִיִּים.",
         pedagogy:
-          "כְּמוֹ בְּמִשְׂחֲקֵי תַּפְקִידִים (RPG), לִימּוּד בְּסִיסִי (לְמָשָׁל חִיבּוּר וְחִיסּוּר) פּוֹתֵחַ אֶת הַדֶּרֶךְ לִמְיוּמָנוּיוֹת עַל (כֶּפֶל, שְׁבָרִים וְרוֹבּוֹטִיקָה)!",
+          "לִימּוּד בְּסִיסִי (לְמָשָׁל חִיבּוּר וְחִיסּוּר) פּוֹתֵחַ אֶת הַדֶּרֶךְ לִמְיוּמָנוּיוֹת-עַל (כֶּפֶל, שְׁבָרִים וְרוֹבּוֹטִיקָה)!",
       },
     ],
   },
   {
-    category: "2. אֶתְגָּרִים וּמְשִׂימוֹת (Quests & Bosses)",
+    category: "2. אֶתְגָּרִים וּמְשִׂימוֹת",
     items: [
       {
-        term: "קְווֶסְט יוֹמִי / רָאשִׁי / צַד (Quests)",
+        term: "מְשִׂימָה יוֹמִית / רָאשִׁית / מְשִׂימַת בּוֹנוּס",
         emoji: "📜",
         meaning: "מְשִׂימָה יוֹמִית קְצָרָה, פְּרוֹיֶקְט רָאשִׁי אוֹ מְשִׂימַת בּוֹנוּס לְהַעֲשָׁרָה.",
         pedagogy:
-          "מְחַלֵּק אֶת הַלְּמִידָה לְמַטְּרוֹת בְּרוּרוֹת וּמְהַנּוֹת עִם שָׁלָל (Loot) בְּסוֹף כָּל קְווֶסְט.",
+          "מְחַלֵּק אֶת הַלְּמִידָה לְמַטְּרוֹת בְּרוּרוֹת וּמְהַנּוֹת עִם אוֹצַר כּוֹכָבִים בְּסוֹף כָּל מְשִׂימָה.",
       },
       {
-        term: "קְרַב בּוֹס (Boss Fight) — 'הָאַרְכִי-בּוֹס מֵתוֹדִיקָה'",
+        term: "קְרַב בּוֹס — 'הָאַרְכִי-בּוֹס מֵתוֹדִיקָה'",
         emoji: "🐉",
         meaning: "אֶתְגַּר מְסַכֵּם אוֹ מַצֶּגֶת שֶׁבּוֹ מְיַשְּׂמִים אֶת כָּל הַכֵּלִים שֶׁאָסַפְנוּ!",
         pedagogy:
@@ -217,43 +217,43 @@ export const GAMING_PEDAGOGY_GLOSSARY = [
     ],
   },
   {
-    category: "3. תְּפִיסַת הַכִּישָּׁלוֹן, מָשׁוֹב וְווִיסּוּת (Growth Mindset)",
+    category: "3. תְּפִיסַת הַכִּישָּׁלוֹן, מָשׁוֹב וְווִיסּוּת",
     items: [
       {
-        term: "נְקוּדַת שְׁמִירָה (Checkpoint)",
+        term: "נְקוּדַת שְׁמִירָה",
         emoji: "🚩",
         meaning: "טְיוּטָה, מִבְדַּק אֶמְצַע אוֹ מָשׁוֹב מְעַצֵּב מֵהַמּוֹרֶה.",
         pedagogy:
-          "אִם טָעִיתָ — אַתָּה לֹא מַתְחִיל מֵאֶפֶס! חוֹזְרִים לַצֶּ'קְפּוֹינְט הָאַחֲרוֹן, מְתַקְּנִים וּמַמְשִׁיכִים קָדִימָה.",
+          "אִם טָעִיתָ — אַתָּה לֹא מַתְחִיל מֵאֶפֶס! חוֹזְרִים לִנְקוּדַת הַשְּׁמִירָה הָאַחֲרוֹנָה, מְתַקְּנִים וּמַמְשִׁיכִים קָדִימָה.",
       },
       {
-        term: "Game Over = לְחַץ Try Again!",
+        term: "מְנַסִּים שׁוּב בְּחָכְמָה!",
         emoji: "🔄",
-        meaning: "כִּישָּׁלוֹן הוּא רַק הַזְמָנָה לְנַסּוֹת שׁוּב חֲכָמִים וּמְנוּסִּים יוֹתֵר.",
+        meaning: "טָעוּת הִיא רַק הַזְמָנָה לְנַסּוֹת שׁוּב חֲכָמִים וּמְנוּסִּים יוֹתֵר.",
         pedagogy:
-          "תְּפִיסַת מְסוּגָּלוּת צוֹמַחַת (Growth Mindset): כָּל שַׂחְקָן גָּדוֹל נִפְסַל לִפְנֵי שֶׁפִּיצֵּחַ אֶת הַשָּׁלָב!",
+          "תְּפִיסַת מְסוּגָּלוּת צוֹמַחַת: כָּל שַׂחְקָן גָּדוֹל מְנַסֶּה שׁוּב לִפְנֵי שֶׁהוּא מְפַצֵּחַ אֶת הַשָּׁלָב!",
       },
       {
-        term: "מַד בְּרִיאוּת וְקֶשֶׁב (HP / Mana Bar)",
+        term: "מַד כּוֹחַ, בְּרִיאוּת וְקֶשֶׁב",
         emoji: "❤️",
         meaning: "מַד הָאֵנֶרְגְּיָה הָרִגְשִׁית, הַקֶּשֶׁב וְהַסַּבְלָנוּת שֶׁלִּי בַּשִּׁיעוּר.",
         pedagogy:
-          "כְּשֶׁהַ-HP נָמוּךְ, לוֹקְחִים 'שִׁיקּוּי בְּרִיאוּת' (נְשִׁימָה, מִילָּה טוֹבָה אוֹ הַפְסָקָה קְצָרָה) וְחוֹזְרִים בְּכוֹחַ מָלֵא!",
+          "כְּשֶׁהַכּוֹחַ נָמוּךְ, לוֹקְחִים 'שִׁיקּוּי כּוֹחַ וְקֶשֶׁב' (נְשִׁימָה, מִילָּה טוֹבָה אוֹ הַפְסָקָה קְצָרָה) וְחוֹזְרִים בְּכוֹחַ מָלֵא!",
       },
     ],
   },
   {
-    category: "4. תַּפְקִידִים חֶבְרָתִיִּים וְשִׁיתּוּף פְּעוּלָה (Co-op & Loot)",
+    category: "4. תַּפְקִידִים חֶבְרָתִיִּים וְשִׁיתּוּף פְּעוּלָה",
     items: [
       {
-        term: "פְּלָאטוֹן / קוֹ-אוֹפּ (Co-op Party / Guild)",
+        term: "נִבְחֶרֶת הַכִּיתָּה",
         emoji: "🛡️",
         meaning: "לְמִידַת עֲמִיתִים שֶׁבָּהּ לְכָל תַּלְמִיד יֵשׁ חוֹזְקָה מְיוּחֶדֶת.",
         pedagogy:
-          "הַ'טַנְק' מוֹבִיל, הַ'הִילֶר' תּוֹמֵךְ וּמַסְבִּיר, וְ'אַלּוּף הַבִּיצּוּעַ' (DPS) בּוֹנֶה אֶת הַתּוֹצָר — יַחַד מְנַצְּחִים!",
+          "הַ'מָּגֵן' מוֹבִיל, הַ'תּוֹמֵךְ' מַסְבִּיר וּמְעוֹדֵד, וְ'אַלּוּף הַבִּיצּוּעַ' בּוֹנֶה אֶת הַתּוֹצָר — יַחַד מְנַצְּחִים!",
       },
       {
-        term: "בָּאף (Buff) + סְקִינִים וְשָׁלָל (Skins & Loot)",
+        term: "חִיזּוּק + תַּלְבּוֹשׁוֹת וְאוֹצָרוֹת",
         emoji: "🎁",
         meaning: "חִיזּוּק זְמַנִּי מֵחָבֵר/מוֹרֶה וַאֲבִיזְרֵי עִיצּוּב אִישִׁיִּים לַדְּמוּת.",
         pedagogy:
@@ -302,7 +302,7 @@ export function StudentGamingHub({
       level: Math.max(1, Math.floor(nextXp / 100) + 1),
     });
     const msg =
-      "🧪 שָׁתִיתָ שִׁיקּוּי בְּרִיאוּת וְקֶשֶׁב! מַד הַ-HP הִתְמַלֵּא לְ-100% וְקִיבַּלְתָּ +15 XP עַל וִיסּוּת עַצְמִי חָכָם!";
+      "🧪 שָׁתִיתָ שִׁיקּוּי כּוֹחַ וְקֶשֶׁב! מַד הַכּוֹחַ הִתְמַלֵּא לְ-100% וְקִיבַּלְתָּ +15 נְקוּדּוֹת אוֹר עַל וִיסּוּת עַצְמִי חָכָם!";
     setPotionMessage(msg);
     speak("כל הכבוד! לקחת נשימה עמוקה, מד הבריאות והקשב שלך התמלא למאה אחוז!");
     setTimeout(() => setPotionMessage(null), 4500);
@@ -349,18 +349,18 @@ export function StudentGamingHub({
             <button
               onClick={onOpenProfileModal}
               className="btn-glow relative rounded-3xl p-1.5 bg-white/90 border-2 border-sky-400 shrink-0 shadow-xs"
-              title="פְּתַח דְּמוּת שַׂחְקָן, סְקִינִים וְשָׁלָל (Skins & Loot)"
+              title="פְּתַח דְּמוּת שַׂחְקָן, תַּלְבּוֹשׁוֹת וְאוֹצָרוֹת"
             >
               <AvatarSvg config={profile.avatar} size={74} />
               <span className="absolute -bottom-2 -right-2 px-2 py-0.5 rounded-xl bg-amber-400 text-slate-950 font-extrabold text-[11px] shadow-xs tabular-nums">
-                LVL {currentLevel}
+                רָמָה {currentLevel}
               </span>
             </button>
 
             <div className="space-y-1.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-lg bg-sky-600 text-white text-xs font-extrabold tabular-nums">
-                  🆙 Level {currentLevel}
+                  🆙 רָמָה {currentLevel}
                 </span>
                 <span
                   className={`px-2.5 py-0.5 rounded-lg border text-xs font-bold ${roleMeta.badgeClass}`}
@@ -368,7 +368,7 @@ export function StudentGamingHub({
                   {roleMeta.emoji} {roleMeta.title} ({roleMeta.engTitle})
                 </span>
                 <span className="text-xs font-bold text-amber-600 tabular-nums">
-                  ⭐ {profile.stars} שָׁלָל כּוֹכָבִים (Loot)
+                  ⭐ {profile.stars} כּוֹכְבֵי אוֹצָר
                 </span>
               </div>
 
@@ -379,9 +379,9 @@ export function StudentGamingHub({
               {/* XP Bar */}
               <div className="w-full max-w-md space-y-1">
                 <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
-                  <span>✨ מַדַּד נִיסָּיוֹן (XP): {totalXp} XP</span>
+                  <span>✨ מַדַּד נְקוּדּוֹת אוֹר: {totalXp} נְקוּדּוֹת</span>
                   <span className="text-sky-700 tabular-nums">
-                    עוֹד {100 - xpIntoLevel} XP לְ-Level Up!
+                    עוֹד {100 - xpIntoLevel} נְקוּדּוֹת לַעֲלִיַּית שָׁלָב!
                   </span>
                 </div>
                 <div className="w-full h-2.5 rounded-full bg-slate-200/90 overflow-hidden p-0.5">
@@ -402,7 +402,7 @@ export function StudentGamingHub({
                 <div className="flex items-center justify-between text-xs font-bold">
                   <span className="text-rose-600 flex items-center gap-1">
                     <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500" />
-                    <span>מַד קֶשֶׁב וְאֵנֶרְגְּיָה (HP)</span>
+                    <span>מַד כּוֹחַ וְקֶשֶׁב</span>
                   </span>
                   <span className="tabular-nums font-extrabold text-slate-800">
                     {currentHp}/100
@@ -420,9 +420,9 @@ export function StudentGamingHub({
                 type="button"
                 onClick={handleDrinkHealthPotion}
                 className="btn-glow px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-600 text-emerald-800 hover:text-white border border-emerald-300 text-xs font-extrabold transition-colors whitespace-nowrap"
-                title="עייפים או מוצפים? שתו שיקוי בריאות להפסקה קצרה ומילוי אנרגיה!"
+                title="עייפים או מוצפים? שתו שיקוי כוח להפסקה קצרה ומילוי אנרגיה!"
               >
-                🧪 שְׁתֵה שִׁיקּוּי HP
+                🧪 שִׁיקּוּי כּוֹחַ וְקֶשֶׁב
               </button>
             </div>
 
@@ -440,7 +440,7 @@ export function StudentGamingHub({
                 }`}
               >
                 <BookOpen className="w-3.5 h-3.5 text-sky-600" />
-                <span>מִילּוֹן הַגֵּיימִינְג הַחִינוּכִי</span>
+                <span>מִילּוֹן הַמִּשְׂחָק הַחִינוּכִי</span>
               </button>
 
               <button
@@ -449,7 +449,7 @@ export function StudentGamingHub({
                 className="btn-glow px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold flex items-center gap-1.5"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>סְקִינִים וְשָׁלָל (Skins & Loot)</span>
+                <span>תַּלְבּוֹשׁוֹת וְאוֹצָרוֹת</span>
               </button>
 
               <button
@@ -488,7 +488,7 @@ export function StudentGamingHub({
           <div className="lg:col-span-7 flex flex-wrap items-center gap-2">
             <span className="text-xs font-extrabold text-slate-700 flex items-center gap-1">
               <Shield className="w-3.5 h-3.5 text-sky-600" />
-              <span>הַתַּפְקִיד שֶׁלִּי בַּפְּלָאטוֹן (Co-op Party):</span>
+              <span>הַתַּפְקִיד שֶׁלִּי בְּנִבְחֶרֶת הַכִּיתָּה:</span>
             </span>
             {(["tank", "healer", "dps"] as PartyRole[]).map((r) => {
               const info = PARTY_ROLES_INFO[r];
@@ -514,7 +514,7 @@ export function StudentGamingHub({
           {/* Active Buff Selector (5 cols) */}
           <div className="lg:col-span-5 flex items-center justify-end gap-2">
             <span className="text-xs font-extrabold text-violet-700 whitespace-nowrap">
-              ✨ בָּאף פָּעִיל (Buff):
+              ✨ חִיזּוּק פָּעִיל:
             </span>
             <select
               value={activeBuff}
@@ -608,13 +608,13 @@ export function StudentGamingHub({
             <div>
               <div className="text-xs font-bold text-sky-600 flex items-center gap-1.5">
                 <GitBranch className="w-4 h-4" />
-                <span>RPG Skill Tree · תּוֹכְנִית הַלִּימּוּדִים כְּעֵץ מְיוּמָנוּיוֹת מתפתח</span>
+                <span>מַפַּת הַלְּמִידָה · תּוֹכְנִית הַלִּימּוּדִים כְּעֵץ מְיוּמָנוּיוֹת מִתְפַּתֵּחַ</span>
               </div>
               <h2 className="text-2xl font-extrabold text-slate-900 nikud">
-                🌳 עֵץ הַמְּיוּמָנוּיוֹת וּמַמְלְכוֹת הָאוֹר (Skill Tree)
+                🌳 עֵץ הַמְּיוּמָנוּיוֹת וּמַמְלְכוֹת הָאוֹר
               </h2>
               <p className="text-xs text-slate-600 mt-0.5 nikud">
-                בִּחֲרוּ עֲנַף מְיוּמָנוּת כְּדֵי לִפְתּוֹחַ שְׁלַבִּים חֲדָשִׁים, לִצְבּוֹר XP וְלִפְתּוֹחַ יְכוֹלוֹת-עַל! כָּל מְיוּמָנוּת בְּסִיסִית פּוֹתַחַת אֶת הַשָּׁלָב הַבָּא בָּעֵץ.
+                בִּחֲרוּ עֲנַף מְיוּמָנוּת כְּדֵי לִפְתּוֹחַ שְׁלַבִּים חֲדָשִׁים, לִצְבּוֹר נְקוּדּוֹת אוֹר וְלִפְתּוֹחַ יְכוֹלוֹת-עַל! כָּל מְיוּמָנוּת בְּסִיסִית פּוֹתַחַת אֶת הַשָּׁלָב הַבָּא בָּעֵץ.
               </p>
             </div>
 
@@ -737,7 +737,7 @@ export function StudentGamingHub({
                   {/* Direct Skill Nodes / Games Launch Buttons */}
                   <div className="space-y-1.5 pt-2 border-t border-slate-200/70">
                     <div className="text-[11px] font-bold text-slate-500">
-                      שְׁלַבֵּי אִימּוּן וּקְווֶסְטִים בָּעֲנָף זֶה (+45 XP לְכָל שָׁלָב):
+                      שְׁלַבֵּי אִימּוּן וּמְשִׂימוֹת בְּעָנָף זֶה (+45 נְקוּדּוֹת אוֹר לְכָל שָׁלָב):
                     </div>
                     <div className="grid grid-cols-1 gap-1.5">
                       {islandGames.map((g, gIdx) => {
@@ -756,7 +756,7 @@ export function StudentGamingHub({
                               </span>
                             </span>
                             <span className="px-2 py-0.5 rounded-md bg-white/20 text-[10px] shrink-0 tabular-nums">
-                              {times > 0 ? `🚩 צֶ'קְפּוֹינְט (${times})` : "שַׂחֵק +XP"}
+                              {times > 0 ? `🚩 שְׁמִירָה (${times})` : "שַׂחֵק +אוֹר"}
                             </span>
                           </button>
                         );
@@ -823,20 +823,20 @@ export function StudentGamingHub({
               <div>
                 <div className="text-xs font-bold text-sky-600 flex items-center gap-1.5">
                   <Swords className="w-4 h-4" />
-                  <span>Quest Log & Boss Arena · שִׁיעוּרֵי הַבַּיִת וְהַמִּבְחָנִים הוֹפְכִים לְהַרְפַּתְקָה</span>
+                  <span>יוֹמַן הַמְּשִׂימוֹת וְזִירַת הָאֶתְגָּרִים · הַלְּמִידָה הוֹפֶכֶת לְהַרְפַּתְקָה</span>
                 </div>
                 <h2 className="text-2xl font-extrabold text-slate-900 nikud">
-                  ⚔️ לוּחַ הַקְּווֶסְטִים וְזִירַת קְרָבוֹת הַבּוֹס
+                  ⚔️ לוּחַ הַמְּשִׂימוֹת וְזִירַת קְרָבוֹת הַבּוֹס
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5 nikud">
-                  הַשְׁלִימוּ קְווֶסְטִים יוֹמִיִּים, מְשִׂימוֹת רָאשִׁיּוֹת וּמְשִׂימוֹת צַד, וְגַלּוּ אֶת נְקוּדוֹת הַתּוֹרְפָּה שֶׁל הַבּוֹסִים כְּדֵי לַעֲלוֹת שָׁלָב (Level Up)!
+                  הַשְׁלִימוּ מְשִׂימוֹת יוֹמִיּוֹת, מְשִׂימוֹת רָאשִׁיּוֹת וּמְשִׂימוֹת בּוֹנוּס, וְגַלּוּ אֶת נְקוּדוֹת הַתּוֹרְפָּה שֶׁל הַבּוֹסִים כְּדֵי לַעֲלוֹת שָׁלָב!
                 </p>
               </div>
 
               <div className="px-4 py-2 rounded-2xl bg-amber-50 border border-amber-300 text-xs font-extrabold text-amber-900 flex items-center gap-2 tabular-nums">
                 <Flame className="w-4 h-4 text-amber-500" />
                 <span>
-                  קְווֶסְט יוֹמִי: {profile.todayCount} / {classState.dailyGoal}{" "}
+                  מְשִׂימָה יוֹמִית: {profile.todayCount} / {classState.dailyGoal}{" "}
                   שְׁלַבִּים הַיּוֹם
                 </span>
               </div>
@@ -845,11 +845,11 @@ export function StudentGamingHub({
             {/* Quest Category Filter Bar */}
             <div className="flex flex-wrap items-center gap-2">
               {[
-                { id: "all", label: "כָּל הַקְּווֶסְטִים", emoji: "📜" },
-                { id: "daily", label: "קְווֶסְט יוֹמִי (Daily Quest)", emoji: "⚡" },
-                { id: "main", label: "מְשִׂימָה רָאשִׁית (Main Quest)", emoji: "🏆" },
-                { id: "side", label: "מְשִׂימַת צַד (Side Quest)", emoji: "🌟" },
-                { id: "boss", label: "קְרַב בּוֹס (Boss Fight)", emoji: "🐉" },
+                { id: "all", label: "כָּל הַמְּשִׂימוֹת", emoji: "📜" },
+                { id: "daily", label: "מְשִׂימָה יוֹמִית", emoji: "⚡" },
+                { id: "main", label: "מְשִׂימָה רָאשִׁית", emoji: "🏆" },
+                { id: "side", label: "מְשִׂימַת בּוֹנוּס", emoji: "🌟" },
+                { id: "boss", label: "קְרַב בּוֹס", emoji: "🐉" },
               ].map((tab) => (
                 <button
                   key={tab.id}
@@ -880,21 +880,21 @@ export function StudentGamingHub({
                 const typeBadge =
                   qType === "boss"
                     ? {
-                        label: "🐉 קְרַב בּוֹס (Boss Fight)",
+                        label: "🐉 קְרַב בּוֹס",
                         cls: "bg-rose-100 text-rose-900 border-rose-300",
                       }
                     : qType === "daily"
                       ? {
-                          label: "⚡ קְווֶסְט יוֹמִי (Daily Quest)",
+                          label: "⚡ מְשִׂימָה יוֹמִית",
                           cls: "bg-amber-100 text-amber-900 border-amber-300",
                         }
                       : qType === "side"
                         ? {
-                            label: "🌟 מְשִׂימַת צַד (Side Quest)",
+                            label: "🌟 מְשִׂימַת בּוֹנוּס",
                             cls: "bg-violet-100 text-violet-900 border-violet-300",
                           }
                         : {
-                            label: "🏆 מְשִׂימָה רָאשִׁית (Main Quest)",
+                            label: "🏆 מְשִׂימָה רָאשִׁית",
                             cls: "bg-sky-100 text-sky-900 border-sky-300",
                           };
 
@@ -917,10 +917,10 @@ export function StudentGamingHub({
                           {typeBadge.label}
                         </span>
                         <span className="px-2.5 py-0.5 rounded-lg bg-indigo-100 text-indigo-900 text-xs font-extrabold tabular-nums">
-                          +{xpReward} XP
+                          +{xpReward} נְקוּדּוֹת אוֹר
                         </span>
                         <span className="text-xs font-bold text-amber-600 tabular-nums">
-                          +15 ⭐ שָׁלָל (Loot)
+                          +15 ⭐ כּוֹכְבֵי אוֹצָר
                         </span>
                       </div>
 
@@ -949,7 +949,7 @@ export function StudentGamingHub({
                       {m.done ? (
                         <div className="px-4 py-2.5 rounded-2xl bg-emerald-500 text-white text-xs font-extrabold flex items-center gap-1.5">
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>הַקְּווֶסְט הוּשְׁלַם! (+{xpReward} XP)</span>
+                          <span>הַמְּשִׂימָה הוּשְׁלְמָה! (+{xpReward} אוֹר)</span>
                         </div>
                       ) : (
                         <button
@@ -965,7 +965,7 @@ export function StudentGamingHub({
                           <span>
                             {qType === "boss"
                               ? "⚔️ צֵא לִקְרַב הַבּוֹס כָּעֵת!"
-                              : "🚀 הַתְחֵל קְווֶסְט כָּעֵת"}
+                              : "🚀 הַתְחֵל מְשִׂימָה כָּעֵת"}
                           </span>
                         </button>
                       )}
@@ -983,14 +983,14 @@ export function StudentGamingHub({
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
                   <Users className="w-5 h-5 text-sky-600" />
-                  <span>🛡️ הַפְּלָאטוֹן הַכִּיתָּתִי שֶׁלָּנוּ (Co-op Guild)</span>
+                  <span>🛡️ נִבְחֶרֶת הַכִּיתָּה שֶׁלָּנוּ</span>
                 </h3>
                 <span className="text-xs font-bold text-sky-700">
-                  {classState.students.length} שַׂחְקָנִים בַּגִּילְדָּה
+                  {classState.students.length} שַׂחְקָנִים בַּנִּבְחֶרֶת
                 </span>
               </div>
               <p className="text-xs text-slate-600">
-                בִּלְמִידַת עֲמִיתִים כָּל אֶחָד תּוֹרֵם מֵהַחוֹזְקָה שֶׁלּוֹ — הַטַּנְק מוֹבִיל, הַהִילֶר מַסְבִּיר וְתוֹמֵךְ, וְאַלּוּף הַבִּיצּוּעַ מֵפִיק תּוֹצָרִים!
+                בִּלְמִידַת עֲמִיתִים כָּל אֶחָד תּוֹרֵם מֵהַחוֹזְקָה שֶׁלּוֹ — הַמָּגֵן מוֹבִיל, הַתּוֹמֵךְ מַסְבִּיר וּמְעוֹדֵד, וְאַלּוּף הַבִּיצּוּעַ מֵפִיק תּוֹצָרִים!
               </p>
 
               <div className="space-y-2.5">
@@ -1012,7 +1012,7 @@ export function StudentGamingHub({
                           <div className="text-sm font-extrabold text-slate-900 flex items-center gap-2 nikud">
                             <span>{st.name}</span>
                             <span className="px-2 py-0.5 rounded-md bg-sky-100 text-sky-800 text-[10px] font-extrabold tabular-nums">
-                              LVL {stLevel}
+                              רָמָה {stLevel}
                             </span>
                           </div>
                           <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
@@ -1039,14 +1039,14 @@ export function StudentGamingHub({
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-extrabold text-slate-900 flex items-center gap-2">
                   <Award className="w-5 h-5 text-amber-500" />
-                  <span>🎁 תָּגֵי הֶישֵּׂג וְשָׁלָל (Badges & Loot)</span>
+                  <span>🎁 תַּלְבּוֹשׁוֹת, תָּגֵי הֶישֵּׂג וְאוֹצָרוֹת</span>
                 </h3>
                 <button
                   type="button"
                   onClick={onOpenProfileModal}
                   className="text-xs font-bold text-violet-600 hover:underline"
                 >
-                  פְּתַח חֲנוּת סְקִינִים ⬅
+                  פְּתַח חֲנוּת תַּלְבּוֹשׁוֹת ⬅
                 </button>
               </div>
               <p className="text-xs text-slate-600">
