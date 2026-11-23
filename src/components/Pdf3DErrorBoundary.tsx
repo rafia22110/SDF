@@ -5,7 +5,49 @@ import {
   Pdf3DModelData,
   PDF_3D_THEME_META,
 } from "../services/pdf3dModelBuilder";
-import { speak } from "../audio";
+import { sfx, speak } from "../audio";
+
+export function Pdf3DInlineCardBanner({
+  fileName,
+  title,
+  category,
+  onOpen3DStudio,
+}: {
+  fileName?: string;
+  title: string;
+  category: string;
+  onOpen3DStudio: () => void;
+}) {
+  return (
+    <div className="mt-2.5 p-3 rounded-2xl bg-slate-900 text-white border border-sky-400/50 flex flex-wrap items-center justify-between gap-2.5 shadow-sm">
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-lg shrink-0">
+          🧊
+        </div>
+        <div>
+          <div className="text-xs font-extrabold text-sky-300">
+            הָפוֹךְ PDF לְמוֹדֶל תְּלַת־מֵמַדִּי וּמִשְׂחַק חֵקֶר (3D)
+          </div>
+          <div className="text-[11px] text-slate-300 truncate max-w-[230px]">
+            {fileName || title} · {category}
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => {
+          sfx.win();
+          onOpen3DStudio();
+        }}
+        className="btn-glow px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shrink-0"
+      >
+        <Box className="w-3.5 h-3.5" />
+        <span>שַׁגֵּר לְמַעְבָּדָה 3D</span>
+      </button>
+    </div>
+  );
+}
 
 interface ErrorBoundaryProps {
   children: ReactNode;

@@ -59,9 +59,9 @@ import {
   DriveFileItem,
 } from "../services/workspaceAuth";
 import {
+  SafePdf3DStudio,
   Pdf3DInlineCardBanner,
-} from "./Pdf3DModelStudio";
-import { SafePdf3DStudio } from "./Pdf3DErrorBoundary";
+} from "./Pdf3DErrorBoundary";
 import {
   getLocalPdf3DModels,
   Pdf3DModelData,
