@@ -2337,9 +2337,9 @@ export function TeacherPanel({
                   pushItemToSmartBoard({
                     id: `buff-${Date.now()}`,
                     type: "note",
-                    title: "✨ בָּאף כִּיתָּתִי מֵהַמּוֹרֶה (Class Buff)!",
+                    title: "✨ חִיזּוּק כִּיתָּתִי מֵהַמּוֹרֶה!",
                     content:
-                      "חִיזּוּק מְיוּחָד לַפְּלָאטוֹן: כָּל מִי שֶׁמְּסַיֵּיעַ לְחָבֵר אוֹ מְנַסֶּה שׁוּב מֵהַצֶּ'קְפּוֹינְט (Try Again) מְקַבֵּל בּוֹנוּס +25 XP!",
+                      "חִיזּוּק מְיוּחָד לַכִּיתָּה: כָּל מִי שֶׁמְּסַיֵּיעַ לְחָבֵר אוֹ מְנַסֶּה שׁוּב מְקַבֵּל בּוֹנוּס +25 נְקוּדּוֹת אוֹר!",
                     emoji: "⚡",
                     category: "משימות כיתה",
                     color: "violet",
@@ -2348,13 +2348,13 @@ export function TeacherPanel({
                     x: 50,
                     y: 50,
                     author: teacherProfile.name,
-                    sourceLabel: "בָּאף כִּיתָּתִי (Buff)",
+                    sourceLabel: "חִיזּוּק כִּיתָּתִי",
                   });
-                  showToast("באף כיתתי שוגר ללוח הלמידה!");
+                  showToast("חִיזּוּק כיתתי שוגר ללוח הלמידה!");
                 }}
                 className="btn-glow px-3 py-1.5 rounded-xl bg-violet-600 text-white font-bold text-xs"
               >
-                + שַׁגֵּר בָּאף (Buff) לַלּוּחַ
+                + שַׁגֵּר חִיזּוּק לַלּוּחַ
               </button>
             </div>
 
@@ -2365,7 +2365,7 @@ export function TeacherPanel({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
                   <label className="block text-xs text-slate-600 font-semibold mb-1">
-                    סוּג הַקְּווֶסְט (Quest Type):
+                    סוּג הַמְּשִׂימָה:
                   </label>
                   <select
                     value={missionQuestType}
@@ -2374,23 +2374,23 @@ export function TeacherPanel({
                     }
                     className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-900"
                   >
-                    <option value="daily">⚡ קְווֶסְט יוֹמִי (Daily Quest)</option>
-                    <option value="main">🏆 מְשִׂימָה רָאשִׁית (Main Quest)</option>
-                    <option value="side">🌟 מְשִׂימַת צַד (Side Quest)</option>
-                    <option value="boss">🐉 קְרַב בּוֹס (Boss Fight)</option>
+                    <option value="daily">⚡ מְשִׂימָה יוֹמִית</option>
+                    <option value="main">🏆 מְשִׂימָה רָאשִׁית</option>
+                    <option value="side">🌟 מְשִׂימַת רְשׁוּת</option>
+                    <option value="boss">🐉 קְרַב בּוֹס כִּיתָּתִי</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs text-slate-600 font-semibold mb-1">
-                    עֲבוּר מִי בַּגִּילְדָּה:
+                    עֲבוּר מִי בַּכִּיתָּה:
                   </label>
                   <select
                     value={missionStudentId}
                     onChange={(e) => setMissionStudentId(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"
                   >
-                    <option value="all">כָּל הַפְּלָאטוֹן (Co-op Party)</option>
+                    <option value="all">כָּל הַכִּיתָּה (צֶוֶות מְשׁוּתָּף)</option>
                     {classState.students.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name} (כיתה {s.grade}׳)
@@ -2452,7 +2452,7 @@ export function TeacherPanel({
                 </label>
                 <input
                   type="text"
-                  placeholder="לְמָשָׁל: הַשְׁלִימוּ אֶת הַשָּׁלָב וְקַבְּלוּ +100 XP וְשָׁלָל..."
+                  placeholder="לְמָשָׁל: הַשְׁלִימוּ אֶת הַשָּׁלָב וְקַבְּלוּ +100 נְקוּדּוֹת אוֹר וְאוֹצָר..."
                   value={missionNote}
                   onChange={(e) => setMissionNote(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs text-slate-900"

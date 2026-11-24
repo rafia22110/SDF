@@ -365,7 +365,7 @@ export function StudentGamingHub({
                 <span
                   className={`px-2.5 py-0.5 rounded-lg border text-xs font-bold ${roleMeta.badgeClass}`}
                 >
-                  {roleMeta.emoji} {roleMeta.title} ({roleMeta.engTitle})
+                  {roleMeta.emoji} {roleMeta.title}
                 </span>
                 <span className="text-xs font-bold text-amber-600 tabular-nums">
                   ⭐ {profile.stars} כּוֹכְבֵי אוֹצָר

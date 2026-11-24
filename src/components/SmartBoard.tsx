@@ -2703,7 +2703,7 @@ export function SmartBoard({
          SUBTAB: INTERACTIVE 3D PDF MODEL & QUEST STUDIO (אולפן תלת-ממד מקבצי PDF)
          ==================================================================== */}
       {subTab === "pdf3d" && (
-        <div className="relative z-10 scroll-mt-24 space-y-4 animate-pop">
+        <div className="relative z-10 scroll-mt-28 pt-2 space-y-4 animate-pop">
           <SafePdf3DStudio
             initialModel={selectedPdf3DModel}
             authorName={userName}

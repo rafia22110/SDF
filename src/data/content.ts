@@ -387,7 +387,7 @@ export function createInitialProfile(
     level: 3,
     hp: 90,
     partyRole: "dps",
-    activeBuff: "בָּאף הַהֶסְבֵּר הַחָכָם (+20% XP וְרֶמֶז מוּבְנֶה)",
+    activeBuff: "חִיזּוּק הַהֶסְבֵּר הַחָכָם (+20% נְקוּדּוֹת אוֹר וְרֶמֶז מוּבְנֶה)",
   };
 }
 

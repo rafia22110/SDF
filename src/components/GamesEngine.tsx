@@ -67,10 +67,10 @@ export function ActiveGameRunner({
 
         <div className="flex items-center gap-2 text-xs font-extrabold">
           <span className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800">
-            🚩 צֶ&apos;קְפּוֹינְט פָּעִיל (Checkpoint)
+            🚩 נְקוּדַת שְׁמִירָה פְּעִילָה
           </span>
           <span className="px-3 py-1.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-800">
-            ✨ +XP וְשָׁלָל (Loot)
+            ✨ נְקוּדּוֹת אוֹר וְאוֹצָר
           </span>
         </div>
       </div>
@@ -191,26 +191,26 @@ function StandardQuizGame({
       <div className="glass-strong rounded-3xl p-8 text-center max-w-xl mx-auto animate-pop">
         <ConfettiBurst active={true} />
         <div className="text-6xl mb-3">🆙🌟</div>
-        <div className="inline-block px-3 py-1 rounded-xl bg-sky-100 text-sky-800 text-xs font-extrabold mb-2">
-          QUEST COMPLETE · +{xpEarned + 30} XP!
+        <div className="inline-block px-3 py-1 rounded-xl bg-sky-100 text-sky-800 text-xs font-extrabold mb-2 nikud">
+          הַמְּשִׂימָה הוּשְׁלְמָה! · +{xpEarned + 30} נְקוּדּוֹת אוֹר
         </div>
-        <h3 className="text-3xl font-extrabold text-slate-900 mb-2">
-          כָּל הַכָּבוֹד! עָלִיתָ בְּמַד הַנִּיסָּיוֹן!
+        <h3 className="text-3xl font-extrabold text-slate-900 mb-2 nikud">
+          כָּל הַכָּבוֹד! עָלִיתָ בְּמַד הָאוֹר!
         </h3>
-        <p className="text-slate-600 mb-6">
+        <p className="text-slate-600 mb-6 nikud">
           פִּיצַּחְתָּ{" "}
           <span className="text-sky-600 font-bold tabular-nums">{score}</span>{" "}
           מִתּוֹךְ{" "}
           <span className="text-sky-600 font-bold tabular-nums">
             {questions.length}
           </span>{" "}
-          צֶ&apos;קְפּוֹינְטִים וְאָסַפְתָּ שָׁלָל כּוֹכְבֵי אוֹר וְ-XP!
+          תַּחֲנוֹת וְאָסַפְתָּ כּוֹכְבֵי אוֹצָר וּנְקוּדּוֹת אוֹר!
         </p>
         <button
           onClick={() => onFinish(score, questions.length)}
-          className="btn-glow px-8 py-3.5 rounded-xl bg-sky-600 text-white font-bold text-base whitespace-nowrap shadow-sm"
+          className="btn-glow px-8 py-3.5 rounded-xl bg-sky-600 text-white font-bold text-base whitespace-nowrap shadow-sm nikud"
         >
-          🎁 אִיסּוּף שָׁלָל (Loot), XP וְסִיּוּם
+          🎁 אִיסּוּף הָאוֹצָר, נְקוּדּוֹת הָאוֹר וְסִיּוּם
         </button>
       </div>
     );
@@ -225,11 +225,11 @@ function StandardQuizGame({
       {/* Progress & Checkpoint Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600 mb-3 tabular-nums font-bold">
         <span className="flex items-center gap-1.5">
-          <span>🚩 צֶ&apos;קְפּוֹינְט (Checkpoint) {idx + 1} מִתּוֹךְ {questions.length}</span>
+          <span>🚩 תַּחֲנָה {idx + 1} מִתּוֹךְ {questions.length}</span>
         </span>
         <div className="flex items-center gap-3">
-          <span className="text-sky-700">✨ +{xpEarned} XP</span>
-          <span className="text-amber-600">שָׁלָל: {score * 10} ⭐</span>
+          <span className="text-sky-700">✨ +{xpEarned} נְקוּדּוֹת אוֹר</span>
+          <span className="text-amber-600">אוֹצָר: {score * 10} ⭐</span>
         </div>
       </div>
       <div className="w-full h-2.5 bg-slate-200/80 rounded-full overflow-hidden mb-6">
@@ -308,7 +308,7 @@ function StandardQuizGame({
               title="הפעל באף רמז"
             >
               <Lightbulb className="w-4 h-4 text-amber-600" />
-              <span>בָּאף רֶמֶז (Buff)</span>
+              <span>רֶמֶז קֶסֶם</span>
             </button>
           )}
         </div>
@@ -316,7 +316,7 @@ function StandardQuizGame({
 
       {showHint && q.hint && (
         <div className="mb-5 p-3.5 rounded-2xl bg-amber-50 border border-amber-300 text-amber-950 text-xs font-bold nikud animate-pop">
-          ✨ <strong>בָּאף הַהֶסְבֵּר הַחָכָם (Buff):</strong> {q.hint}
+          ✨ <strong>רֶמֶז חָכָם:</strong> {q.hint}
         </div>
       )}
 
@@ -324,11 +324,11 @@ function StandardQuizGame({
       {checkpointMode && (
         <div className="mb-5 p-4 rounded-2xl bg-sky-50 border-2 border-sky-300 flex flex-wrap items-center justify-between gap-3 animate-pop">
           <div className="space-y-0.5">
-            <div className="text-xs font-extrabold text-sky-900 flex items-center gap-1.5">
-              <span>🚩 נְקוּדַת שְׁמִירָה (Checkpoint) — לֹא פְּסִילַת מִשְׂחָק!</span>
+            <div className="text-xs font-extrabold text-sky-900 flex items-center gap-1.5 nikud">
+              <span>🚩 נְקוּדַת שְׁמִירָה — לֹא פְּסִילַת מִשְׂחָק!</span>
             </div>
             <p className="text-xs text-slate-600 nikud">
-              בְּגֵיימִינְג טָעוּת הִיא הִזְדַּמְּנוּת לִלְחוֹץ <strong>Try Again</strong> חֲכָמִים וּמְנוּסִּים יוֹתֵר (+5 XP עַל הַתְמָדָה)!
+              טָעוּת הִיא הִזְדַּמְּנוּת לְנַסּוֹת שׁוּב וְלִלְמוֹד (+5 נְקוּדּוֹת אוֹר עַל הַתְמָדָה)!
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -338,7 +338,7 @@ function StandardQuizGame({
               className="btn-glow px-4 py-2 rounded-xl bg-sky-600 text-white text-xs font-extrabold flex items-center gap-1.5"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>🔄 Try Again (נַסֵּה שֵׁנִית)</span>
+              <span>🔄 נַסֵּה שֵׁנִית</span>
             </button>
             <button
               type="button"

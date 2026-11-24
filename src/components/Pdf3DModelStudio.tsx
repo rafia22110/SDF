@@ -1723,8 +1723,8 @@ export function Pdf3DModelStudio({
               <h4 className="text-2xl font-extrabold text-white nikud">
                 ניצחון! השלמתם את חקר ה-PDF התלת־ממדי!
               </h4>
-              <p className="text-xs text-slate-300">
-                אספתם את כל 4 גבישי הידע מתוך <strong>{activeModel.fileName}</strong> וזכיתם ב-<strong>+120 XP</strong> ו-<strong>+15 ⭐ כוכבי אור</strong>!
+              <p className="text-xs text-slate-300 nikud">
+                אֲסַפְתֶּם אֶת כָּל 4 גְּבִישֵׁי הַיֶּדַע מִתּוֹךְ <strong>{activeModel.fileName}</strong> וּזְכִיתֶם בְּ-<strong>+120 נְקוּדּוֹת אוֹר</strong> וּבְ-<strong>+15 ⭐ כּוֹכְבֵי אוֹצָר</strong>!
               </p>
               <div className="flex gap-2 justify-center">
                 <button
